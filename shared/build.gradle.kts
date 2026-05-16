@@ -7,11 +7,11 @@ dependencies {
 
   api(projects.buildData)
 
-  api("org.ow2.asm:asm:9.9.1")
-  api("org.ow2.asm:asm-analysis:9.9.1")
-  api("org.ow2.asm:asm-commons:9.9.1")
-  api("org.ow2.asm:asm-tree:9.9.1")
-  api("org.ow2.asm:asm-util:9.9.1")
+  api("org.ow2.asm:asm:9.10")
+  api("org.ow2.asm:asm-analysis:9.10")
+  api("org.ow2.asm:asm-commons:9.10")
+  api("org.ow2.asm:asm-tree:9.10")
+  api("org.ow2.asm:asm-util:9.10")
   api("net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7")
   api("net.fabricmc:fabric-loader:0.19.2")
   api("net.fabricmc:mapping-io:0.8.0")

@@ -23,7 +23,7 @@ dependencies {
   implementation(libs.gradle.plugin.freefair)
   implementation("net.ltgt.errorprone:net.ltgt.errorprone.gradle.plugin:5.1.0")
   implementation("org.openrewrite:plugin:7.32.2")
-  implementation("org.ow2.asm:asm:9.9.1")
+  implementation("org.ow2.asm:asm:9.10")
 }
 
 java {
