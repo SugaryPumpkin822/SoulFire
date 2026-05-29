@@ -310,7 +310,7 @@ public final class BotConnection {
             }
 
             minecraft.disconnectWithProgressScreen();
-          }).orTimeout(5, TimeUnit.SECONDS).join();
+          }).get(5, TimeUnit.SECONDS);
         } catch (Throwable _) {
         }
 
