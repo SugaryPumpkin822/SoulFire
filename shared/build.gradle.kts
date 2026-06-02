@@ -35,8 +35,8 @@ dependencies {
   api("commons-codec:commons-codec:1.22.0")
   api("commons-io:commons-io:2.22.0")
   api("it.unimi.dsi:fastutil:8.5.18")
-  api("net.java.dev.jna:jna-platform:5.18.1")
-  api("net.java.dev.jna:jna:5.18.1")
+  api("net.java.dev.jna:jna-platform:5.19.0")
+  api("net.java.dev.jna:jna:5.19.0")
   api("net.sf.jopt-simple:jopt-simple:5.0.4")
   api("org.apache.commons:commons-compress:1.28.0")
   api("org.apache.commons:commons-lang3:3.20.0")
@@ -59,7 +59,7 @@ dependencies {
   api(projects.buildData)
 
   // Newest netty
-  api("io.netty:netty-all:4.2.14.Final")
+  api("io.netty:netty-all:4.2.15.Final")
 
   api("io.github.classgraph:classgraph:4.8.184")
 
