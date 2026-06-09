@@ -68,7 +68,7 @@ public final class SFLogAppender extends AbstractAppender {
 
   @Override
   public void append(LogEvent event) {
-    if (event.getContextData().containsKey(SF_SKIP_PUBLISHING)) {
+    if (event.getContextData().containsKey(SF_SKIP_PUBLISHING) || ProxyCheckLogFilter.shouldDeny(event)) {
       return;
     }
 

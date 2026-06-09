@@ -19,6 +19,7 @@ package com.soulfiremc.launcher;
 
 import com.soulfiremc.builddata.BuildData;
 import com.soulfiremc.shared.Base64Helpers;
+import com.soulfiremc.shared.ProxyCheckLogFilter;
 import com.soulfiremc.shared.SFInfoPlaceholder;
 import lombok.SneakyThrows;
 import net.fabricmc.loader.impl.launch.knot.KnotClient;
@@ -81,6 +82,7 @@ public final class SoulFirePostLibLauncher {
       injectEarlyMixins();
       setupManagedMods(basePath);
       SFInfoPlaceholder.register();
+      ProxyCheckLogFilter.register();
       SFMinecraftDownloader.loadAndInjectMinecraftJar(basePath);
 
       KnotClient.main(new String[]{"--username", "SoulFire"});

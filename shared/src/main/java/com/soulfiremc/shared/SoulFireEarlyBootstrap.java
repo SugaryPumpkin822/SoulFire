@@ -29,6 +29,7 @@ public final class SoulFireEarlyBootstrap {
 
   public static void earlyBootstrap() {
     SFInfoPlaceholder.register();
+    ProxyCheckLogFilter.register();
 
     // Install the Log4J JUL bridge
     LogManager.getLogManager().reset();
