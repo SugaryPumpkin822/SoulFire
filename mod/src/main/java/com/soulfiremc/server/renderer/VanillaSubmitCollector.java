@@ -17,6 +17,8 @@
  */
 package com.soulfiremc.server.renderer;
 
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -81,6 +83,8 @@ import java.util.List;
 import java.util.Map;
 
 final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmitNodeCollector {
+  private static final Identifier ENCHANTED_GLINT_ITEM = Identifier.withDefaultNamespace("textures/misc/enchanted_glint_item.png");
+  private static final int GLINT_TINT = 0x99A070FF;
   private static final RendererAssets.TextureImage WHITE_TEXTURE = createSolidTexture(0xFFFFFFFF);
   private final RenderContext ctx;
   private final RendererAssets assets;
@@ -379,7 +383,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       color,
       faceEmission,
       outlineColor,
-      renderType
+      renderType,
+      false,
+      false
     );
   }
 
@@ -391,8 +397,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     int light,
     int overlay,
     TextureAtlasSprite sprite,
-    boolean invertCull,
-    boolean hasTextureOffset,
+    boolean sheeted,
+    boolean hasFoil,
     int color,
     ModelFeatureRenderer.CrumblingOverlay crumblingOverlay,
     int emission
@@ -414,8 +420,25 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       color,
       faceEmission,
       outlineColor,
-      renderType
+      renderType,
+      sheeted,
+      false
     );
+    if (hasFoil) {
+      appendModelPartGeometry(
+        modelPart,
+        poseStack,
+        glintTexture(),
+        RendererAssets.AlphaMode.TRANSLUCENT,
+        0,
+        GLINT_TINT,
+        0,
+        0,
+        renderType,
+        sheeted,
+        true
+      );
+    }
   }
 
   @Override
@@ -467,6 +490,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   ) {
     for (var quad : quads) {
       appendBakedQuad(quad, poseStack.last().pose(), quad.materialInfo() != null ? quad.materialInfo().itemRenderType() : null, color, tints);
+      if (foilType != ItemStackRenderState.FoilType.NONE) {
+        appendBakedQuadGlint(quad, poseStack.last().pose(), quad.materialInfo() != null ? quad.materialInfo().itemRenderType() : null);
+      }
     }
   }
 
@@ -480,7 +506,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       texture,
       alphaMode,
       alphaCutoutThreshold(renderType, alphaMode),
-      renderType.pipeline().getDepthStencilState()
+      renderType,
+      null
     );
     renderer.render(poseStack.last(), consumer);
     consumer.flush();
@@ -522,7 +549,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     int color,
     int emission,
     int outlineColor,
-    @Nullable RenderType renderType
+    @Nullable RenderType renderType,
+    boolean sheeted,
+    boolean glint
   ) {
     modelPart.visit(poseStack, (pose, _, _, cube) -> {
       for (var polygon : cube.polygons) {
@@ -543,7 +572,17 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         }
 
         var face = RendererAssets.GeometryFace.of(vertices, uv, texture, alphaMode, null, -1, emission, true);
-        builder.add(withDepthState(WorldMeshCollector.toRenderQuad(face, 0.0, 0.0, 0.0, color, true, 0.0F, alphaCutoutThreshold), renderType));
+        var quad = WorldMeshCollector.toRenderQuad(
+          face,
+          0.0,
+          0.0,
+          0.0,
+          color,
+          false,
+          0.0F,
+          alphaCutoutThreshold
+        );
+        builder.add(glint ? withMaterial(quad, glintMaterial(texture, sheeted)) : withRenderState(quad, renderType));
         if (outlineVertices != null) {
           addFace(outlineVertices, WHITE_TEXTURE, RendererAssets.AlphaMode.OPAQUE, outlineColor, 0, true, new float[]{0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 1.0F, 0.0F});
         }
@@ -588,16 +627,41 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       quad.materialInfo().lightEmission(),
       quad.materialInfo().shade()
     );
-    builder.add(withDepthState(WorldMeshCollector.toRenderQuad(
+    builder.add(withRenderState(WorldMeshCollector.toRenderQuad(
       face,
       0.0,
       0.0,
       0.0,
       color,
-      true,
+      doubleSided(effectiveRenderType),
       0.0F,
       alphaCutoutThreshold(effectiveRenderType, alphaMode)
     ), effectiveRenderType));
+  }
+
+  private void appendBakedQuadGlint(BakedQuad quad, Matrix4fc poseMatrix, @Nullable RenderType renderType) {
+    if (quad == null || quad.materialInfo() == null || quad.materialInfo().sprite() == null || quad.materialInfo().sprite().contents() == null) {
+      return;
+    }
+
+    var sprite = quad.materialInfo().sprite();
+    var vertices = new Vector3f[4];
+    var uv = new float[8];
+    for (var i = 0; i < 4; i++) {
+      Vector3fc position = quad.position(i);
+      vertices[i] = poseMatrix.transformPosition(new Vector3f(position));
+      var packedUv = quad.packedUV(i);
+      uv[i * 2] = BakedQuadUv.localU(sprite, packedUv);
+      uv[i * 2 + 1] = BakedQuadUv.localV(sprite, packedUv);
+    }
+
+    builder.add(new RenderQuad(
+      new RenderVertex(vertices[0].x(), vertices[0].y(), vertices[0].z(), uv[0], uv[1], 0xFFFFFFFF),
+      new RenderVertex(vertices[1].x(), vertices[1].y(), vertices[1].z(), uv[2], uv[3], 0xFFFFFFFF),
+      new RenderVertex(vertices[2].x(), vertices[2].y(), vertices[2].z(), uv[4], uv[5], 0xFFFFFFFF),
+      new RenderVertex(vertices[3].x(), vertices[3].y(), vertices[3].z(), uv[6], uv[7], 0xFFFFFFFF),
+      glintMaterial(glintTexture(), true)
+    ));
   }
 
   @Nullable
@@ -729,12 +793,12 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     return texture.hasAlpha() ? RendererAssets.AlphaMode.CUTOUT : RendererAssets.AlphaMode.OPAQUE;
   }
 
-  private RenderQuad withDepthState(RenderQuad quad, @Nullable RenderType renderType) {
+  private RenderQuad withRenderState(RenderQuad quad, @Nullable RenderType renderType) {
     if (renderType == null) {
       return quad;
     }
 
-    return withMaterial(quad, quad.material().withDepthState(renderType.pipeline().getDepthStencilState()));
+    return withMaterial(quad, quad.material().withRenderType(renderType));
   }
 
   private RenderQuad withDepthTest(RenderQuad quad, RenderMaterial.DepthTest depthTest, boolean depthWrite) {
@@ -743,6 +807,30 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
 
   private RenderQuad withMaterial(RenderQuad quad, RenderMaterial material) {
     return new RenderQuad(quad.v0(), quad.v1(), quad.v2(), quad.v3(), material);
+  }
+
+  private boolean doubleSided(@Nullable RenderType renderType) {
+    return renderType != null && !renderType.pipeline().isCull();
+  }
+
+  private RenderMaterial glintMaterial(RendererAssets.TextureImage texture, boolean sheeted) {
+    return new RenderMaterial(
+      texture,
+      RendererAssets.AlphaMode.TRANSLUCENT,
+      GLINT_TINT,
+      false,
+      0.0F,
+      0,
+      RenderMaterial.DepthTest.EQUAL,
+      false,
+      RenderMaterial.BlendState.from(BlendFunction.GLINT),
+      ColorTargetState.WRITE_ALL,
+      RenderMaterial.UvTransform.glint(sheeted ? 8.0F : 0.5F)
+    );
+  }
+
+  private RendererAssets.TextureImage glintTexture() {
+    return assets.texture(ENCHANTED_GLINT_ITEM);
   }
 
   private int alphaCutoutThreshold(@Nullable RenderType renderType, RendererAssets.AlphaMode alphaMode) {
@@ -814,6 +902,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     private final int alphaCutoutThreshold;
     @Nullable
     private final DepthStencilState depthStencilState;
+    @Nullable
+    private final RenderType renderType;
     private final ArrayList<CapturedVertex> vertices = new ArrayList<>();
     private float lineWidth = 1.0F;
     private CapturedVertex current;
@@ -824,6 +914,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       RendererAssets.TextureImage texture,
       RendererAssets.AlphaMode alphaMode,
       int alphaCutoutThreshold,
+      @Nullable RenderType renderType,
       @Nullable DepthStencilState depthStencilState
     ) {
       this.pose = pose;
@@ -831,6 +922,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       this.texture = texture;
       this.alphaMode = alphaMode;
       this.alphaCutoutThreshold = alphaCutoutThreshold;
+      this.renderType = renderType;
       this.depthStencilState = depthStencilState;
     }
 
@@ -934,7 +1026,10 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
 
     private void addCapturedFace(Vector3f[] positions, int[] colors, float[] uv) {
-      var material = RenderMaterial.create(texture, alphaMode, 0xFFFFFFFF, true, 0.0F, alphaCutoutThreshold).withDepthState(depthStencilState);
+      var material = RenderMaterial.create(texture, alphaMode, 0xFFFFFFFF, false, 0.0F, alphaCutoutThreshold).withDepthState(depthStencilState);
+      if (renderType != null) {
+        material = material.withRenderType(renderType);
+      }
       builder.add(new RenderQuad(
         renderVertex(positions[0], uv[0], uv[1], colors[0]),
         renderVertex(positions[1], uv[2], uv[3], colors[1]),
@@ -1001,7 +1096,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
           texture,
           alphaMode,
           alphaCutoutThreshold(type, alphaMode),
-          type.pipeline().getDepthStencilState()
+          type,
+          null
         );
       });
     }
@@ -1035,6 +1131,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
           texture,
           currentLayer.translucent() ? RendererAssets.AlphaMode.TRANSLUCENT : RendererAssets.AlphaMode.OPAQUE,
           currentLayer.translucent() ? RenderMaterial.defaultAlphaCutoutThreshold(RendererAssets.AlphaMode.TRANSLUCENT) : 0,
+          null,
           new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, !currentLayer.translucent())
         )
       );

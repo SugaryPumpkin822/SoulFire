@@ -17,6 +17,9 @@
  */
 package com.soulfiremc.server.renderer;
 
+import com.mojang.blaze3d.pipeline.ColorTargetState;
+import com.mojang.blaze3d.platform.DestFactor;
+import com.mojang.blaze3d.platform.SourceFactor;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
@@ -333,7 +336,11 @@ public final class RasterPipeline {
         var inverseW = normalizedW0 * v0.inverseW() + normalizedW1 * v1.inverseW() + normalizedW2 * v2.inverseW();
         var u = (normalizedW0 * v0.uOverW() + normalizedW1 * v1.uOverW() + normalizedW2 * v2.uOverW()) / inverseW;
         var v = (normalizedW0 * v0.vOverW() + normalizedW1 * v1.vOverW() + normalizedW2 * v2.vOverW()) / inverseW;
-        var sampled = material.texture().sample(u, v, animationTick);
+        var sampled = material.texture().sample(
+          material.uvTransform().u(u, v, animationTick),
+          material.uvTransform().v(u, v, animationTick),
+          animationTick
+        );
         var vertexColor = interpolatedColor(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2);
         var color = modulate(modulate(sampled, vertexColor), material.color());
         var alpha = (color >>> 24) & 0xFF;
@@ -348,11 +355,11 @@ public final class RasterPipeline {
           if (material.depthWrite()) {
             depthBuffer[rasterIndex] = depth;
           }
-          colorBuffer[rasterIndex] = forceOpaque(color);
+          writeColor(colorBuffer, rasterIndex, forceOpaque(color), material);
           continue;
         }
 
-        colorBuffer[rasterIndex] = blend(colorBuffer[rasterIndex], color);
+        writeColor(colorBuffer, rasterIndex, color, material);
         if (material.depthWrite()) {
           depthBuffer[rasterIndex] = depth;
         }
@@ -414,22 +421,95 @@ public final class RasterPipeline {
     return 0xFF000000 | (color & 0x00FFFFFF);
   }
 
-  private int blend(int dstColor, int srcColor) {
+  private void writeColor(int[] colorBuffer, int rasterIndex, int srcColor, RenderMaterial material) {
+    if (material.colorWriteMask() == ColorTargetState.WRITE_NONE) {
+      return;
+    }
+
+    var dstColor = colorBuffer[rasterIndex];
+    var output = material.blendState().blends() ? blend(dstColor, srcColor, material.blendState()) : srcColor;
+    colorBuffer[rasterIndex] = applyColorWriteMask(dstColor, output, material.colorWriteMask());
+  }
+
+  private int applyColorWriteMask(int dstColor, int output, int writeMask) {
+    var color = dstColor;
+    if ((writeMask & ColorTargetState.WRITE_ALPHA) != 0) {
+      color = (color & 0x00FFFFFF) | (output & 0xFF000000);
+    }
+    if ((writeMask & ColorTargetState.WRITE_RED) != 0) {
+      color = (color & 0xFF00FFFF) | (output & 0x00FF0000);
+    }
+    if ((writeMask & ColorTargetState.WRITE_GREEN) != 0) {
+      color = (color & 0xFFFF00FF) | (output & 0x0000FF00);
+    }
+    if ((writeMask & ColorTargetState.WRITE_BLUE) != 0) {
+      color = (color & 0xFFFFFF00) | (output & 0x000000FF);
+    }
+    return color;
+  }
+
+  private int blend(int dstColor, int srcColor, RenderMaterial.BlendState blendState) {
     var dstR = (dstColor >> 16) & 0xFF;
     var dstG = (dstColor >> 8) & 0xFF;
     var dstB = dstColor & 0xFF;
+    var dstA = (dstColor >>> 24) & 0xFF;
     var srcA = (srcColor >>> 24) & 0xFF;
     var srcR = (srcColor >> 16) & 0xFF;
     var srcG = (srcColor >> 8) & 0xFF;
     var srcB = srcColor & 0xFF;
-    var srcAlpha = srcA / 255.0F;
-    var invAlpha = 1.0F - srcAlpha;
-    var outR = (int) (srcR * srcAlpha + dstR * invAlpha);
-    var outG = (int) (srcG * srcAlpha + dstG * invAlpha);
-    var outB = (int) (srcB * srcAlpha + dstB * invAlpha);
-    var dstA = (dstColor >>> 24) & 0xFF;
-    var outA = Math.min(255, (int) (srcA + dstA * invAlpha));
+    var outR = blendChannel(srcR, dstR, srcR, dstR, srcA, dstA, blendState.sourceColor(), blendState.destColor());
+    var outG = blendChannel(srcG, dstG, srcG, dstG, srcA, dstA, blendState.sourceColor(), blendState.destColor());
+    var outB = blendChannel(srcB, dstB, srcB, dstB, srcA, dstA, blendState.sourceColor(), blendState.destColor());
+    var outA = blendChannel(srcA, dstA, srcA, dstA, srcA, dstA, blendState.sourceAlpha(), blendState.destAlpha());
     return (outA << 24) | (outR << 16) | (outG << 8) | outB;
+  }
+
+  private int blendChannel(
+    int srcChannel,
+    int dstChannel,
+    int srcColorChannel,
+    int dstColorChannel,
+    int srcAlpha,
+    int dstAlpha,
+    SourceFactor sourceFactor,
+    DestFactor destFactor
+  ) {
+    var srcScale = sourceFactor(sourceFactor, srcColorChannel, dstColorChannel, srcAlpha, dstAlpha);
+    var dstScale = destFactor(destFactor, srcColorChannel, dstColorChannel, srcAlpha, dstAlpha);
+    return Math.clamp(Math.round(srcChannel * srcScale + dstChannel * dstScale), 0, 255);
+  }
+
+  private float sourceFactor(SourceFactor factor, int srcColor, int dstColor, int srcAlpha, int dstAlpha) {
+    return switch (factor) {
+      case ZERO -> 0.0F;
+      case ONE -> 1.0F;
+      case SRC_COLOR -> srcColor / 255.0F;
+      case ONE_MINUS_SRC_COLOR -> 1.0F - srcColor / 255.0F;
+      case DST_COLOR -> dstColor / 255.0F;
+      case ONE_MINUS_DST_COLOR -> 1.0F - dstColor / 255.0F;
+      case SRC_ALPHA -> srcAlpha / 255.0F;
+      case ONE_MINUS_SRC_ALPHA -> 1.0F - srcAlpha / 255.0F;
+      case DST_ALPHA -> dstAlpha / 255.0F;
+      case ONE_MINUS_DST_ALPHA -> 1.0F - dstAlpha / 255.0F;
+      case SRC_ALPHA_SATURATE -> Math.min(srcAlpha / 255.0F, 1.0F - dstAlpha / 255.0F);
+      case CONSTANT_COLOR, ONE_MINUS_CONSTANT_COLOR, CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA -> 0.0F;
+    };
+  }
+
+  private float destFactor(DestFactor factor, int srcColor, int dstColor, int srcAlpha, int dstAlpha) {
+    return switch (factor) {
+      case ZERO -> 0.0F;
+      case ONE -> 1.0F;
+      case SRC_COLOR -> srcColor / 255.0F;
+      case ONE_MINUS_SRC_COLOR -> 1.0F - srcColor / 255.0F;
+      case DST_COLOR -> dstColor / 255.0F;
+      case ONE_MINUS_DST_COLOR -> 1.0F - dstColor / 255.0F;
+      case SRC_ALPHA -> srcAlpha / 255.0F;
+      case ONE_MINUS_SRC_ALPHA -> 1.0F - srcAlpha / 255.0F;
+      case DST_ALPHA -> dstAlpha / 255.0F;
+      case ONE_MINUS_DST_ALPHA -> 1.0F - dstAlpha / 255.0F;
+      case CONSTANT_COLOR, ONE_MINUS_CONSTANT_COLOR, CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA -> 0.0F;
+    };
   }
 
   private enum ClipPlane {

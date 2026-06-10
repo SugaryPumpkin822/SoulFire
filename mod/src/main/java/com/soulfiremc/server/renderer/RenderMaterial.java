@@ -17,8 +17,15 @@
  */
 package com.soulfiremc.server.renderer;
 
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.platform.CompareOp;
+import com.mojang.blaze3d.platform.DestFactor;
+import com.mojang.blaze3d.platform.SourceFactor;
+import net.minecraft.client.renderer.rendertype.RenderType;
+
+import org.jetbrains.annotations.Nullable;
 
 /// Raster state shared by all triangles emitted from one source primitive.
 public record RenderMaterial(
@@ -29,7 +36,10 @@ public record RenderMaterial(
   float depthBias,
   int alphaCutoutThreshold,
   DepthTest depthTest,
-  boolean depthWrite
+  boolean depthWrite,
+  BlendState blendState,
+  int colorWriteMask,
+  UvTransform uvTransform
 ) {
   public static RenderMaterial create(
     RendererAssets.TextureImage texture,
@@ -57,11 +67,14 @@ public record RenderMaterial(
       depthBias,
       alphaCutoutThreshold,
       DepthTest.LESS_THAN_OR_EQUAL,
-      defaultDepthWrite(alphaMode)
+      defaultDepthWrite(alphaMode),
+      defaultBlendState(alphaMode),
+      ColorTargetState.WRITE_ALL,
+      UvTransform.IDENTITY
     );
   }
 
-  public RenderMaterial withDepthState(DepthStencilState depthStencilState) {
+  public RenderMaterial withDepthState(@Nullable DepthStencilState depthStencilState) {
     return new RenderMaterial(
       texture,
       alphaMode,
@@ -70,7 +83,28 @@ public record RenderMaterial(
       depthBias + depthBias(depthStencilState),
       alphaCutoutThreshold,
       depthTest(depthStencilState),
-      depthWrite(depthStencilState)
+      depthWrite(depthStencilState),
+      blendState,
+      colorWriteMask,
+      uvTransform
+    );
+  }
+
+  public RenderMaterial withRenderType(RenderType renderType) {
+    var pipeline = renderType.pipeline();
+    var colorTargetState = pipeline.getColorTargetState();
+    return new RenderMaterial(
+      texture,
+      alphaMode,
+      color,
+      doubleSided || !pipeline.isCull(),
+      depthBias + depthBias(pipeline.getDepthStencilState()),
+      alphaCutoutThreshold,
+      depthTest(pipeline.getDepthStencilState()),
+      depthWrite(pipeline.getDepthStencilState()),
+      BlendState.from(colorTargetState.blendFunction().orElse(null)),
+      colorTargetState.writeMask(),
+      uvTransform
     );
   }
 
@@ -83,7 +117,42 @@ public record RenderMaterial(
       depthBias,
       alphaCutoutThreshold,
       depthTest,
-      depthWrite
+      depthWrite,
+      blendState,
+      colorWriteMask,
+      uvTransform
+    );
+  }
+
+  public RenderMaterial withBlendState(BlendState blendState) {
+    return new RenderMaterial(
+      texture,
+      alphaMode,
+      color,
+      doubleSided,
+      depthBias,
+      alphaCutoutThreshold,
+      depthTest,
+      depthWrite,
+      blendState,
+      colorWriteMask,
+      uvTransform
+    );
+  }
+
+  public RenderMaterial withUvTransform(UvTransform uvTransform) {
+    return new RenderMaterial(
+      texture,
+      alphaMode,
+      color,
+      doubleSided,
+      depthBias,
+      alphaCutoutThreshold,
+      depthTest,
+      depthWrite,
+      blendState,
+      colorWriteMask,
+      uvTransform
     );
   }
 
@@ -99,15 +168,19 @@ public record RenderMaterial(
     return alphaMode != RendererAssets.AlphaMode.TRANSLUCENT;
   }
 
-  private static DepthTest depthTest(DepthStencilState depthStencilState) {
+  public static BlendState defaultBlendState(RendererAssets.AlphaMode alphaMode) {
+    return alphaMode == RendererAssets.AlphaMode.TRANSLUCENT ? BlendState.from(BlendFunction.TRANSLUCENT) : BlendState.REPLACE;
+  }
+
+  private static DepthTest depthTest(@Nullable DepthStencilState depthStencilState) {
     return depthStencilState == null ? DepthTest.ALWAYS_PASS : DepthTest.fromCompareOp(depthStencilState.depthTest());
   }
 
-  private static boolean depthWrite(DepthStencilState depthStencilState) {
+  private static boolean depthWrite(@Nullable DepthStencilState depthStencilState) {
     return depthStencilState != null && depthStencilState.writeDepth();
   }
 
-  private static float depthBias(DepthStencilState depthStencilState) {
+  private static float depthBias(@Nullable DepthStencilState depthStencilState) {
     if (depthStencilState == null) {
       return 0.0F;
     }
@@ -178,6 +251,70 @@ public record RenderMaterial(
         case GREATER_THAN -> GREATER_THAN;
         case NEVER_PASS -> NEVER_PASS;
       };
+    }
+  }
+
+  public record BlendState(SourceFactor sourceColor, DestFactor destColor, SourceFactor sourceAlpha, DestFactor destAlpha) {
+    public static final BlendState REPLACE = new BlendState(SourceFactor.ONE, DestFactor.ZERO, SourceFactor.ONE, DestFactor.ZERO);
+
+    public static BlendState from(@Nullable BlendFunction blendFunction) {
+      return blendFunction == null
+        ? REPLACE
+        : new BlendState(blendFunction.sourceColor(), blendFunction.destColor(), blendFunction.sourceAlpha(), blendFunction.destAlpha());
+    }
+
+    public boolean blends() {
+      return sourceColor != SourceFactor.ONE
+        || destColor != DestFactor.ZERO
+        || sourceAlpha != SourceFactor.ONE
+        || destAlpha != DestFactor.ZERO;
+    }
+  }
+
+  public record UvTransform(
+    float uFromU,
+    float uFromV,
+    float vFromU,
+    float vFromV,
+    float uOffsetScale,
+    float vOffsetScale,
+    long uPeriodTicks,
+    long vPeriodTicks
+  ) {
+    public static final UvTransform IDENTITY = new UvTransform(1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0L, 0L);
+    private static final long GLINT_U_PERIOD_TICKS = 2_200L;
+    private static final long GLINT_V_PERIOD_TICKS = 600L;
+
+    public static UvTransform glint(float scale) {
+      var angle = (float) (Math.PI / 18.0);
+      var sin = (float) Math.sin(angle);
+      var cos = (float) Math.cos(angle);
+      return new UvTransform(
+        cos * scale,
+        -sin * scale,
+        sin * scale,
+        cos * scale,
+        -1.0F,
+        1.0F,
+        GLINT_U_PERIOD_TICKS,
+        GLINT_V_PERIOD_TICKS
+      );
+    }
+
+    public float u(float u, float v, long animationTick) {
+      return u * uFromU + v * uFromV + uOffsetScale * offset(animationTick, uPeriodTicks);
+    }
+
+    public float v(float u, float v, long animationTick) {
+      return u * vFromU + v * vFromV + vOffsetScale * offset(animationTick, vPeriodTicks);
+    }
+
+    private static float offset(long animationTick, long periodTicks) {
+      if (periodTicks <= 0L) {
+        return 0.0F;
+      }
+
+      return Math.floorMod(animationTick, periodTicks) / (float) periodTicks;
     }
   }
 }

@@ -17,6 +17,8 @@
  */
 package com.soulfiremc.test.renderer;
 
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.soulfiremc.server.renderer.*;
 import net.minecraft.world.phys.Vec3;
@@ -145,16 +147,8 @@ class RasterPipelineTest {
       vertex(-1.0F, 1.0F, 8.0F, 0.0F, 0.0F),
       vertex(1.0F, 1.0F, 8.0F, 1.0F, 0.0F),
       vertex(1.0F, -1.0F, 8.0F, 1.0F, 1.0F),
-      new RenderMaterial(
-        solidTexture(0xFF00FF00),
-        RendererAssets.AlphaMode.OPAQUE,
-        0xFFFFFFFF,
-        false,
-        0.0F,
-        0,
-        RenderMaterial.DepthTest.ALWAYS_PASS,
-        false
-      )
+      RenderMaterial.create(solidTexture(0xFF00FF00), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F)
+        .withDepthTest(RenderMaterial.DepthTest.ALWAYS_PASS, false)
     ));
 
     pipeline.renderSynthetic(camera, scene.build(), buffers, 0L, 0xFF000000);
@@ -173,6 +167,27 @@ class RasterPipelineTest {
       vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
       vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
       vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      RenderMaterial.create(solidTexture(0xFFFF0000), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F)
+        .withDepthTest(RenderMaterial.DepthTest.LESS_THAN_OR_EQUAL, false)
+    ));
+    scene.add(quad(-1.0F, -1.0F, 8.0F, 1.0F, 1.0F, solidTexture(0xFF0000FF), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF));
+
+    pipeline.renderSynthetic(camera, scene.build(), buffers, 0L, 0xFF000000);
+
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF0000FF, 3);
+  }
+
+  @Test
+  void colorWriteMaskCanUpdateDepthWithoutReplacingColor() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    scene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
       new RenderMaterial(
         solidTexture(0xFFFF0000),
         RendererAssets.AlphaMode.OPAQUE,
@@ -181,14 +196,69 @@ class RasterPipelineTest {
         0.0F,
         0,
         RenderMaterial.DepthTest.LESS_THAN_OR_EQUAL,
-        false
+        true,
+        RenderMaterial.BlendState.REPLACE,
+        ColorTargetState.WRITE_NONE,
+        RenderMaterial.UvTransform.IDENTITY
       )
     ));
     scene.add(quad(-1.0F, -1.0F, 8.0F, 1.0F, 1.0F, solidTexture(0xFF0000FF), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF));
 
+    pipeline.renderSynthetic(camera, scene.build(), buffers, 0L, 0xFF101010);
+
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF101010, 3);
+  }
+
+  @Test
+  void lightningBlendFunctionAddsSourceOverDestination() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    scene.add(quad(-1.2F, -1.2F, 6.0F, 1.2F, 1.2F, solidTexture(0xFF000040), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF));
+    scene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      RenderMaterial.create(solidTexture(0x80FF0000), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, false, 0.0F)
+        .withBlendState(RenderMaterial.BlendState.from(BlendFunction.LIGHTNING))
+    ));
+
     pipeline.renderSynthetic(camera, scene.build(), buffers, 0L, 0xFF000000);
 
-    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF0000FF, 3);
+    var color = buffers.image().getRGB(WIDTH / 2, HEIGHT / 2);
+    assertChannelNear((color >> 16) & 0xFF, 128, 3);
+    assertChannelNear(color & 0xFF, 64, 3);
+  }
+
+  @Test
+  void materialUvTransformChangesSampleCoordinates() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var identityBuffers = new RasterBuffers(WIDTH, HEIGHT);
+    var transformedBuffers = new RasterBuffers(WIDTH, HEIGHT);
+    var texture = splitTexture(0xFFFF0000, 0xFF00FF00);
+    var identityScene = SceneData.builder();
+    identityScene.add(quad(-1.0F, -1.0F, 4.0F, 1.0F, 1.0F, texture, RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF));
+    var transformedMaterial = RenderMaterial.create(texture, RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F)
+      .withUvTransform(new RenderMaterial.UvTransform(1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 2L, 0L));
+    var transformedScene = SceneData.builder();
+    transformedScene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      transformedMaterial
+    ));
+
+    pipeline.renderSynthetic(camera, identityScene.build(), identityBuffers, 1L, 0xFF000000);
+    pipeline.renderSynthetic(camera, transformedScene.build(), transformedBuffers, 1L, 0xFF000000);
+
+    assertFalse(sameRgb(
+      identityBuffers.image().getRGB(WIDTH / 2 - 8, HEIGHT / 2),
+      transformedBuffers.image().getRGB(WIDTH / 2 - 8, HEIGHT / 2)
+    ));
   }
 
   @Test
@@ -434,6 +504,10 @@ class RasterPipelineTest {
     assertChannelNear((actual >> 16) & 0xFF, (expected >> 16) & 0xFF, tolerance);
     assertChannelNear((actual >> 8) & 0xFF, (expected >> 8) & 0xFF, tolerance);
     assertChannelNear(actual & 0xFF, expected & 0xFF, tolerance);
+  }
+
+  private static boolean sameRgb(int first, int second) {
+    return (first & 0x00FFFFFF) == (second & 0x00FFFFFF);
   }
 
   private static void assertChannelNear(int actual, int expected, int tolerance) {
