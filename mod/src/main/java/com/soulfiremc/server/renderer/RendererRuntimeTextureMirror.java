@@ -25,8 +25,10 @@ import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class RendererRuntimeTextureMirror {
@@ -99,6 +101,33 @@ public final class RendererRuntimeTextureMirror {
       return mirrored != null && mirrored.hasUploadData() ? mirrored.toTextureImage(location) : null;
     }
   }
+
+  public static List<DebugTextureSnapshot> debugSnapshots() {
+    synchronized (LOCK) {
+      var snapshots = new ArrayList<DebugTextureSnapshot>(TEXTURES.size());
+      for (var entry : TEXTURES.entrySet()) {
+        var mirrored = entry.getValue();
+        snapshots.add(new DebugTextureSnapshot(
+          entry.getKey(),
+          mirrored.width,
+          mirrored.height,
+          mirrored.format.toString(),
+          mirrored.hasUploadData(),
+          mirrored.hasUploadData() ? mirrored.toTextureImage(entry.getKey()) : null
+        ));
+      }
+      return snapshots;
+    }
+  }
+
+  public record DebugTextureSnapshot(
+    Identifier location,
+    int width,
+    int height,
+    String format,
+    boolean hasUploadData,
+    @Nullable RendererAssets.TextureImage texture
+  ) {}
 
   private static boolean isPlayerSkin(Identifier location) {
     return location.getPath().startsWith("skins/");

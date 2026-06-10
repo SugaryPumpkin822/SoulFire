@@ -56,10 +56,13 @@ public final class RenderDebugTrace {
   private final LongAdder opaqueTriangles = new LongAdder();
   private final LongAdder cutoutTriangles = new LongAdder();
   private final LongAdder translucentTriangles = new LongAdder();
+  private final LongAdder textSubmissions = new LongAdder();
   private final AtomicInteger sampleCount = new AtomicInteger();
   private final AtomicInteger stacktraceSampleCount = new AtomicInteger();
+  private final AtomicInteger textSampleCount = new AtomicInteger();
   private final ConcurrentLinkedQueue<String> notableEvents = new ConcurrentLinkedQueue<>();
   private final ConcurrentLinkedQueue<String> detailedFailures = new ConcurrentLinkedQueue<>();
+  private final ConcurrentLinkedQueue<TextSubmission> textSamples = new ConcurrentLinkedQueue<>();
   private volatile long worldCollectNanos;
   private volatile long dynamicCollectNanos;
   private volatile long rasterNanos;
@@ -79,6 +82,10 @@ public final class RenderDebugTrace {
     if (!isEnabled()) {
       return DISABLED;
     }
+    return new RenderDebugTrace(true, NEXT_ID.getAndIncrement(), width, height, maxDistance, yRot, xRot);
+  }
+
+  public static RenderDebugTrace createForced(int width, int height, int maxDistance, float yRot, float xRot) {
     return new RenderDebugTrace(true, NEXT_ID.getAndIncrement(), width, height, maxDistance, yRot, xRot);
   }
 
@@ -218,6 +225,35 @@ public final class RenderDebugTrace {
     }
   }
 
+  public void textSubmission(
+    String source,
+    String text,
+    boolean shadow,
+    String displayMode,
+    int light,
+    int color,
+    int backgroundColor,
+    int outlineColor
+  ) {
+    if (!enabled) {
+      return;
+    }
+
+    textSubmissions.increment();
+    if (textSampleCount.incrementAndGet() <= SAMPLE_LIMIT) {
+      textSamples.add(new TextSubmission(
+        source,
+        text,
+        shadow,
+        displayMode,
+        light,
+        hexArgb(color),
+        hexArgb(backgroundColor),
+        hexArgb(outlineColor)
+      ));
+    }
+  }
+
   public void worldCollectNanos(long nanos) {
     if (enabled) {
       worldCollectNanos = nanos;
@@ -293,6 +329,32 @@ public final class RenderDebugTrace {
     }
   }
 
+  public Snapshot snapshot() {
+    return new Snapshot(
+      renderId,
+      chunksConsidered.sum(),
+      chunksLoaded.sum(),
+      sectionsVisible.sum(),
+      sectionsMeshed.sum(),
+      sectionCacheHits.sum(),
+      sectionCacheMisses.sum(),
+      blockQuads.sum(),
+      entitiesConsidered.sum(),
+      entitiesVisible.sum(),
+      billboards.sum(),
+      weatherBillboards.sum(),
+      vanillaBlockGeometryHits.sum(),
+      vanillaBlockGeometryFallbacks.sum(),
+      opaqueTriangles.sum(),
+      cutoutTriangles.sum(),
+      translucentTriangles.sum(),
+      textSubmissions.sum(),
+      new ArrayList<>(textSamples),
+      new ArrayList<>(notableEvents),
+      new ArrayList<>(detailedFailures)
+    );
+  }
+
   private void note(String message) {
     if (sampleCount.incrementAndGet() <= SAMPLE_LIMIT) {
       notableEvents.add(message);
@@ -329,4 +391,43 @@ public final class RenderDebugTrace {
   private long nanosToMillis(long nanos) {
     return nanos / 1_000_000L;
   }
+
+  private static String hexArgb(int color) {
+    return "0x%08X".formatted(color);
+  }
+
+  public record TextSubmission(
+    String source,
+    String text,
+    boolean shadow,
+    String displayMode,
+    int light,
+    String color,
+    String backgroundColor,
+    String outlineColor
+  ) {}
+
+  public record Snapshot(
+    long renderId,
+    long chunksConsidered,
+    long chunksLoaded,
+    long sectionsVisible,
+    long sectionsMeshed,
+    long sectionCacheHits,
+    long sectionCacheMisses,
+    long blockQuads,
+    long entitiesConsidered,
+    long entitiesVisible,
+    long billboards,
+    long weatherBillboards,
+    long vanillaBlockGeometryHits,
+    long vanillaBlockGeometryFallbacks,
+    long opaqueTriangles,
+    long cutoutTriangles,
+    long translucentTriangles,
+    long textSubmissions,
+    ArrayList<TextSubmission> textSamples,
+    ArrayList<String> notableEvents,
+    ArrayList<String> detailedFailures
+  ) {}
 }

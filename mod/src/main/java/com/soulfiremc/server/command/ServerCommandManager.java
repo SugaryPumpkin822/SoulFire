@@ -79,6 +79,7 @@ public final class ServerCommandManager {
     HealthCommand.register(dispatcher);
     ExportMapCommand.register(dispatcher);
     ExportBasicRenderCommand.register(dispatcher);
+    ExportRenderDebugDumpCommand.register(dispatcher);
     StopTaskCommand.register(dispatcher);
 
     // Context commands

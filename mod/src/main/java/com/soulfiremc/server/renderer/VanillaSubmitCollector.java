@@ -371,6 +371,16 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     int backgroundColor,
     int outlineColor
   ) {
+    RenderDebugTrace.current().textSubmission(
+      "formatted",
+      formattedText(text),
+      shadow,
+      displayMode.name(),
+      light,
+      color,
+      backgroundColor,
+      outlineColor
+    );
     var bufferSource = new CapturingBufferSource();
     if (outlineColor != 0) {
       font().drawInBatch8xOutline(text, x, y, color, outlineColor, poseStack.last().pose(), bufferSource, light);
@@ -956,6 +966,16 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     Font.DisplayMode displayMode,
     int light
   ) {
+    RenderDebugTrace.current().textSubmission(
+      "component",
+      text.getString(),
+      false,
+      displayMode.name(),
+      light,
+      color,
+      backgroundColor,
+      0
+    );
     var bufferSource = new CapturingBufferSource();
     font().drawInBatch(text, x, y, color, false, poseStack.last().pose(), bufferSource, displayMode, backgroundColor, light);
     bufferSource.flush();
@@ -1016,6 +1036,15 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
 
   private Font font() {
     return Minecraft.getInstance().font;
+  }
+
+  private static String formattedText(FormattedCharSequence text) {
+    var builder = new StringBuilder();
+    text.accept((_, _, codePoint) -> {
+      builder.appendCodePoint(codePoint);
+      return true;
+    });
+    return builder.toString();
   }
 
   static RendererAssets.AlphaMode alphaMode(@Nullable RenderType renderType, RendererAssets.TextureImage texture, int color) {
