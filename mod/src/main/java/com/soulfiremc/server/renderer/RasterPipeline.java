@@ -34,16 +34,10 @@ public final class RasterPipeline {
 
   public void render(RenderContext ctx, SceneData sceneData, RasterBuffers buffers) {
     renderSky(ctx, buffers);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.clouds(), buffers, false, RasterPassKind.TRANSLUCENT);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.weather(), buffers, false, RasterPassKind.TRANSLUCENT);
+    renderScene(ctx.camera(), sceneData, buffers, ctx.animationTick());
   }
 
-  public void renderSynthetic(Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick, int clearColor) {
-    buffers.clearColor(clearColor);
-    buffers.clearDepth();
+  void renderScene(Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick) {
     rasterPass(camera, animationTick, sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE);
     rasterPass(camera, animationTick, sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT);
     rasterPass(camera, animationTick, sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT);

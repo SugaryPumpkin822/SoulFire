@@ -50,13 +50,6 @@ public final class LightingCalculator {
     return brighten(color, light);
   }
 
-  public static int emissiveColor(int tintColor, int emission) {
-    if (emission <= 0) {
-      return tintColor;
-    }
-    return brighten(tintColor, 0.35F + emission / 15.0F * 0.65F);
-  }
-
   public static Vector3f faceNormal(RendererAssets.GeometryFace face) {
     var edgeAX = face.x()[1] - face.x()[0];
     var edgeAY = face.y()[1] - face.y()[0];

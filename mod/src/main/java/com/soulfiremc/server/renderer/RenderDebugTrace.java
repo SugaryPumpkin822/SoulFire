@@ -47,21 +47,12 @@ public final class RenderDebugTrace {
   private final LongAdder sectionCacheHits = new LongAdder();
   private final LongAdder sectionCacheMisses = new LongAdder();
   private final LongAdder blockQuads = new LongAdder();
-  private final LongAdder fluidTopQuads = new LongAdder();
-  private final LongAdder fluidBottomQuads = new LongAdder();
-  private final LongAdder fluidSideQuads = new LongAdder();
   private final LongAdder entitiesConsidered = new LongAdder();
   private final LongAdder entitiesVisible = new LongAdder();
   private final LongAdder billboards = new LongAdder();
-  private final LongAdder shadows = new LongAdder();
   private final LongAdder weatherBillboards = new LongAdder();
   private final LongAdder vanillaBlockGeometryHits = new LongAdder();
   private final LongAdder vanillaBlockGeometryFallbacks = new LongAdder();
-  private final LongAdder vanillaLivingModelHits = new LongAdder();
-  private final LongAdder vanillaLivingModelFallbacks = new LongAdder();
-  private final LongAdder vanillaPlayerModelHits = new LongAdder();
-  private final LongAdder vanillaPlayerModelFallbacks = new LongAdder();
-  private final LongAdder entityTextureFallbacks = new LongAdder();
   private final LongAdder opaqueTriangles = new LongAdder();
   private final LongAdder cutoutTriangles = new LongAdder();
   private final LongAdder translucentTriangles = new LongAdder();
@@ -153,24 +144,6 @@ public final class RenderDebugTrace {
     }
   }
 
-  public void fluidTopQuad() {
-    if (enabled) {
-      fluidTopQuads.increment();
-    }
-  }
-
-  public void fluidBottomQuad() {
-    if (enabled) {
-      fluidBottomQuads.increment();
-    }
-  }
-
-  public void fluidSideQuad() {
-    if (enabled) {
-      fluidSideQuads.increment();
-    }
-  }
-
   public void entityConsidered() {
     if (enabled) {
       entitiesConsidered.increment();
@@ -186,12 +159,6 @@ public final class RenderDebugTrace {
   public void billboard() {
     if (enabled) {
       billboards.increment();
-    }
-  }
-
-  public void shadow() {
-    if (enabled) {
-      shadows.increment();
     }
   }
 
@@ -219,64 +186,6 @@ public final class RenderDebugTrace {
     vanillaBlockGeometryFallback(blockId);
     note("block-fallback-reason:" + blockId + ":" + throwable.getClass().getSimpleName());
     noteFailure("block-fallback", blockId, throwable);
-  }
-
-  public void vanillaLivingModelHit(String entityType) {
-    if (!enabled) {
-      return;
-    }
-    vanillaLivingModelHits.increment();
-    note("living-model:" + entityType);
-  }
-
-  public void vanillaLivingModelFallback(String entityType) {
-    if (!enabled) {
-      return;
-    }
-    vanillaLivingModelFallbacks.increment();
-    note("living-fallback:" + entityType);
-  }
-
-  public void vanillaLivingModelFallback(String entityType, Throwable throwable) {
-    vanillaLivingModelFallback(entityType);
-    note("living-fallback-reason:" + entityType + ":" + throwable.getClass().getSimpleName());
-    noteFailure("living-fallback", entityType, throwable);
-  }
-
-  public void vanillaPlayerModelHit(String playerId) {
-    if (!enabled) {
-      return;
-    }
-    vanillaPlayerModelHits.increment();
-    note("player-model:" + playerId);
-  }
-
-  public void vanillaPlayerModelFallback(String playerId) {
-    if (!enabled) {
-      return;
-    }
-    vanillaPlayerModelFallbacks.increment();
-    note("player-fallback:" + playerId);
-  }
-
-  public void vanillaPlayerModelFallback(String playerId, Throwable throwable) {
-    vanillaPlayerModelFallback(playerId);
-    note("player-fallback-reason:" + playerId + ":" + throwable.getClass().getSimpleName());
-    noteFailure("player-fallback", playerId, throwable);
-  }
-
-  public void entityTextureFallback(String entityType) {
-    if (!enabled) {
-      return;
-    }
-    entityTextureFallbacks.increment();
-    note("entity-texture-fallback:" + entityType);
-  }
-
-  public void entityTextureFallback(String entityType, Throwable throwable) {
-    entityTextureFallback(entityType);
-    note("entity-texture-fallback-reason:" + entityType + ":" + throwable.getClass().getSimpleName());
-    noteFailure("entity-texture-fallback", entityType, throwable);
   }
 
   public void missingTexture(String textureId) {
@@ -338,7 +247,7 @@ public final class RenderDebugTrace {
       return;
     }
     log.info(
-      "renderer-debug#{} size={}x{} dist={} yaw={} pitch={} scene[opaque={},cutout={},translucent={},clouds={},weather={}] world[chunks={},loaded={},sections={},meshed={},cacheHit={},cacheMiss={}] quads[block={},fluidTop={},fluidBottom={},fluidSide={},billboard={},shadow={},weather={}] entities[seen={},visible={}] vanilla[blockHit={},blockFallback={},livingHit={},livingFallback={},playerHit={},playerFallback={},entityTextureFallback={}] raster[opaqueTris={},cutoutTris={},translucentTris={}] timeMs[world={},dynamic={},raster={},total={}]",
+      "renderer-debug#{} size={}x{} dist={} yaw={} pitch={} scene[opaque={},cutout={},translucent={},clouds={},weather={}] world[chunks={},loaded={},sections={},meshed={},cacheHit={},cacheMiss={}] quads[block={},billboard={},weather={}] entities[seen={},visible={}] vanilla[blockHit={},blockFallback={}] raster[opaqueTris={},cutoutTris={},translucentTris={}] timeMs[world={},dynamic={},raster={},total={}]",
       renderId,
       width,
       height,
@@ -357,21 +266,12 @@ public final class RenderDebugTrace {
       sectionCacheHits.sum(),
       sectionCacheMisses.sum(),
       blockQuads.sum(),
-      fluidTopQuads.sum(),
-      fluidBottomQuads.sum(),
-      fluidSideQuads.sum(),
       billboards.sum(),
-      shadows.sum(),
       weatherBillboards.sum(),
       entitiesConsidered.sum(),
       entitiesVisible.sum(),
       vanillaBlockGeometryHits.sum(),
       vanillaBlockGeometryFallbacks.sum(),
-      vanillaLivingModelHits.sum(),
-      vanillaLivingModelFallbacks.sum(),
-      vanillaPlayerModelHits.sum(),
-      vanillaPlayerModelFallbacks.sum(),
-      entityTextureFallbacks.sum(),
       opaqueTriangles.sum(),
       cutoutTriangles.sum(),
       translucentTriangles.sum(),

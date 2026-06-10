@@ -43,18 +43,13 @@ public final class Camera {
   private final double upX;
   private final double upY;
   private final double upZ;
-  private final double tanHalfFovY;
-  private final double tanHalfFovX;
   private final double screenXMult;
   private final double screenYMult;
   private final double screenXOffset;
   private final double screenYOffset;
-  private final float nearPlane;
   private final float farPlane;
   private final Matrix4f viewRotationMatrix;
-  private final Matrix4f viewMatrix;
   private final Matrix4f projectionMatrix;
-  private final Matrix4f viewRotationProjectionMatrix;
   private final Matrix4f viewProjectionMatrix;
   private final Quaternionf orientation;
   private final FrustumIntersection frustumIntersection;
@@ -67,7 +62,6 @@ public final class Camera {
     this.eyeZ = eyePos.z;
     this.yRot = yRot;
     this.xRot = xRot;
-    this.nearPlane = DEFAULT_NEAR_PLANE;
     this.farPlane = farPlane;
 
     var yRotRad = Math.toRadians(yRot);
@@ -91,17 +85,18 @@ public final class Camera {
 
     var fovRad = Math.toRadians(fov);
     var aspectRatio = (double) width / height;
-    this.tanHalfFovY = Math.tan(fovRad / 2.0);
-    this.tanHalfFovX = tanHalfFovY * aspectRatio;
+    var tanHalfFovY = Math.tan(fovRad / 2.0);
+    var tanHalfFovX = tanHalfFovY * aspectRatio;
     this.screenXMult = 2.0 * tanHalfFovX / width;
     this.screenYMult = 2.0 * tanHalfFovY / height;
     this.screenXOffset = tanHalfFovX;
     this.screenYOffset = tanHalfFovY;
 
+    var nearPlane = DEFAULT_NEAR_PLANE;
     this.viewRotationMatrix = new Matrix4f().rotation(new Quaternionf(orientation).conjugate());
-    this.viewMatrix = new Matrix4f(viewRotationMatrix).translate((float) -eyeX, (float) -eyeY, (float) -eyeZ);
+    var viewMatrix = new Matrix4f(viewRotationMatrix).translate((float) -eyeX, (float) -eyeY, (float) -eyeZ);
     this.projectionMatrix = new Matrix4f().setPerspective((float) fovRad, (float) aspectRatio, nearPlane, farPlane);
-    this.viewRotationProjectionMatrix = new Matrix4f(projectionMatrix).mul(viewRotationMatrix);
+    var viewRotationProjectionMatrix = new Matrix4f(projectionMatrix).mul(viewRotationMatrix);
     this.viewProjectionMatrix = new Matrix4f(projectionMatrix).mul(viewMatrix);
     this.frustumIntersection = new FrustumIntersection(viewRotationProjectionMatrix);
   }
@@ -211,18 +206,6 @@ public final class Camera {
     return upZ;
   }
 
-  public double tanHalfFovX() {
-    return tanHalfFovX;
-  }
-
-  public double tanHalfFovY() {
-    return tanHalfFovY;
-  }
-
-  public float nearPlane() {
-    return nearPlane;
-  }
-
   public float farPlane() {
     return farPlane;
   }
@@ -231,16 +214,8 @@ public final class Camera {
     return new Matrix4f(viewRotationMatrix);
   }
 
-  public Matrix4f viewMatrix() {
-    return new Matrix4f(viewMatrix);
-  }
-
   public Matrix4f projectionMatrix() {
     return new Matrix4f(projectionMatrix);
-  }
-
-  public Matrix4f viewRotationProjectionMatrix() {
-    return new Matrix4f(viewRotationProjectionMatrix);
   }
 
   public Matrix4f viewProjectionMatrix() {

@@ -108,54 +108,6 @@ public record RenderMaterial(
     );
   }
 
-  public RenderMaterial withDepthTest(DepthTest depthTest, boolean depthWrite) {
-    return new RenderMaterial(
-      texture,
-      alphaMode,
-      color,
-      doubleSided,
-      depthBias,
-      alphaCutoutThreshold,
-      depthTest,
-      depthWrite,
-      blendState,
-      colorWriteMask,
-      uvTransform
-    );
-  }
-
-  public RenderMaterial withBlendState(BlendState blendState) {
-    return new RenderMaterial(
-      texture,
-      alphaMode,
-      color,
-      doubleSided,
-      depthBias,
-      alphaCutoutThreshold,
-      depthTest,
-      depthWrite,
-      blendState,
-      colorWriteMask,
-      uvTransform
-    );
-  }
-
-  public RenderMaterial withUvTransform(UvTransform uvTransform) {
-    return new RenderMaterial(
-      texture,
-      alphaMode,
-      color,
-      doubleSided,
-      depthBias,
-      alphaCutoutThreshold,
-      depthTest,
-      depthWrite,
-      blendState,
-      colorWriteMask,
-      uvTransform
-    );
-  }
-
   public static int defaultAlphaCutoutThreshold(RendererAssets.AlphaMode alphaMode) {
     return switch (alphaMode) {
       case OPAQUE -> 0;

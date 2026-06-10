@@ -55,7 +55,7 @@ class VanillaSubmitCollectorTextTest {
     assertTrue(scene.totalQuadCount() > 0);
 
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
-    new RasterPipeline().renderSynthetic(camera, scene, buffers, 0L, 0xFF000000);
+    renderSynthetic(new RasterPipeline(), camera, scene, buffers, 0L, 0xFF000000);
 
     assertTrue(countChangedPixels(buffers, 0xFF000000) > 0);
   }
@@ -78,7 +78,7 @@ class VanillaSubmitCollectorTextTest {
     assertTrue(scene.translucent()[0].material().doubleSided());
 
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
-    new RasterPipeline().renderSynthetic(camera, scene, buffers, 0L, 0xFF000000);
+    renderSynthetic(new RasterPipeline(), camera, scene, buffers, 0L, 0xFF000000);
 
     assertTrue(countChangedPixels(buffers, 0xFF000000) > 0);
   }
@@ -152,6 +152,12 @@ class VanillaSubmitCollectorTextTest {
     Field field = VanillaSubmitCollector.class.getDeclaredField("builder");
     field.setAccessible(true);
     return ((SceneData.Builder) field.get(collector)).build();
+  }
+
+  private static void renderSynthetic(RasterPipeline pipeline, Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick, int clearColor) {
+    buffers.clearColor(clearColor);
+    buffers.clearDepth();
+    pipeline.renderScene(camera, sceneData, buffers, animationTick);
   }
 
   private static int countChangedPixels(RasterBuffers buffers, int backgroundColor) {

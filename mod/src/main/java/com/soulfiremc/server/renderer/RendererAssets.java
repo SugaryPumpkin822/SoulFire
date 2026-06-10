@@ -21,23 +21,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Axis;
 import com.mojang.math.Quadrant;
 import lombok.extern.slf4j.Slf4j;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.FaceInfo;
 import net.minecraft.client.renderer.block.BlockModelRenderState;
 import net.minecraft.client.renderer.block.model.BlockDisplayContext;
 import net.minecraft.client.renderer.block.model.BlockStateModelWrapper;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import net.minecraft.client.renderer.entity.EntityRenderer;
-import net.minecraft.client.renderer.entity.LivingEntityRenderer;
-import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -50,12 +41,8 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.DryFoliageColor;
 import net.minecraft.world.level.FoliageColor;
 import net.minecraft.world.level.GrassColor;
@@ -63,12 +50,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HalfTransparentBlock;
 import net.minecraft.world.level.block.LeavesBlock;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
@@ -79,8 +61,12 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -92,7 +78,6 @@ public final class RendererAssets {
   private static final Identifier FOLIAGE_COLOR_MAP = Identifier.withDefaultNamespace("textures/colormap/foliage.png");
   private static final Identifier DRY_FOLIAGE_COLOR_MAP = Identifier.withDefaultNamespace("textures/colormap/dry_foliage.png");
   private final ConcurrentMap<BlockState, BlockGeometry> blockGeometryCache = new ConcurrentHashMap<>();
-  private final ConcurrentMap<Identifier, BlockStateDefinition> blockStateCache = new ConcurrentHashMap<>();
   private final ConcurrentMap<Identifier, ResolvedModel> modelCache = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, TextureImage> textureCache = new ConcurrentHashMap<>();
   private final Object vanillaColorMapLoadLock = new Object();
@@ -109,24 +94,6 @@ public final class RendererAssets {
     return blockGeometryCache.computeIfAbsent(blockState, this::buildBlockGeometry);
   }
 
-  public FluidGeometry fluidGeometry(FluidState fluidState, BlockPos pos, BlockState blockState) {
-    if (fluidState.isEmpty()) {
-      return FluidGeometry.EMPTY;
-    }
-
-    var texturePath = fluidState.is(FluidTags.LAVA)
-      ? Identifier.withDefaultNamespace("block/lava_still")
-      : Identifier.withDefaultNamespace("block/water_still");
-    var flowTexturePath = fluidState.is(FluidTags.LAVA)
-      ? Identifier.withDefaultNamespace("block/lava_flow")
-      : Identifier.withDefaultNamespace("block/water_flow");
-    var texture = texture(texturePath);
-    var flowTexture = texture(flowTexturePath);
-    var alphaMode = fluidState.is(FluidTags.WATER) ? AlphaMode.TRANSLUCENT : AlphaMode.OPAQUE;
-    var emission = fluidState.is(FluidTags.LAVA) ? 15 : 0;
-    return new FluidGeometry(texture, flowTexture, alphaMode, emission, fluidState.getHeight(EmptyBlockGetterProxy.INSTANCE, pos), fluidState.getOwnHeight());
-  }
-
   public ItemRenderModel itemRenderModel(ItemStack itemStack) {
     if (itemStack.isEmpty()) {
       return ItemRenderModel.EMPTY;
@@ -140,7 +107,7 @@ public final class RendererAssets {
     var itemId = BuiltInRegistries.ITEM.getKey(itemStack.getItem());
     var resolvedModel = resolveModel(itemId.withPrefix("item/"));
     if (resolvedModel != null && !resolvedModel.elements.isEmpty()) {
-      var baked = bakeResolvedModel(resolvedModel, BlockRenderContext.forItem(itemStack), 0, 0);
+      var baked = bakeResolvedModel(resolvedModel, Blocks.AIR.defaultBlockState(), 0, 0);
       if (!baked.faces().isEmpty()) {
         return new ItemRenderModel(new BlockGeometry(baked.faces()), null);
       }
@@ -149,50 +116,6 @@ public final class RendererAssets {
     var layer0 = resolvedModel != null ? resolveTextureReference("#layer0", resolvedModel.textures) : null;
     var texture = layer0 != null ? texture(layer0.sprite()) : texture(itemId.withPrefix("item/"));
     return new ItemRenderModel(BlockGeometry.EMPTY, new BillboardTexture(texture, AlphaMode.CUTOUT));
-  }
-
-  public TextureImage entityTexture(Entity entity) {
-    if (entity instanceof AbstractClientPlayer player) {
-      return playerTexture(player);
-    }
-
-    try {
-      var minecraft = Minecraft.getInstance();
-      EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
-      @SuppressWarnings({"rawtypes"})
-      EntityRenderer rawRenderer = dispatcher.getRenderer(entity);
-      if (rawRenderer != null) {
-        EntityRenderState renderState = rawRenderer.createRenderState(entity, 1.0F);
-        if (rawRenderer instanceof LivingEntityRenderer<?, ?, ?> livingRenderer
-          && renderState instanceof LivingEntityRenderState livingState) {
-          @SuppressWarnings("rawtypes")
-          var rawLivingRenderer = (LivingEntityRenderer) livingRenderer;
-          var textureLocation = rawLivingRenderer.getTextureLocation(livingState);
-          if (textureLocation instanceof Identifier identifier) {
-            return texture(identifier);
-          }
-        }
-      }
-    } catch (Throwable t) {
-      RenderDebugTrace.current().entityTextureFallback(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), t);
-      log.debug("Failed to resolve entity texture for {}", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()), t);
-    }
-
-    RenderDebugTrace.current().entityTextureFallback(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
-    return MISSING_TEXTURE;
-  }
-
-  @Nullable
-  public EntityRenderState entityRenderState(Entity entity) {
-    try {
-      var dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
-      @SuppressWarnings({"rawtypes"})
-      EntityRenderer rawRenderer = dispatcher.getRenderer(entity);
-      return rawRenderer != null ? rawRenderer.createRenderState(entity, 1.0F) : null;
-    } catch (Throwable t) {
-      log.debug("Failed to extract entity render state for {}", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()), t);
-      return null;
-    }
   }
 
   public TextureImage texture(ClientAsset.Texture textureAsset) {
@@ -212,26 +135,6 @@ public final class RendererAssets {
   public TextureImage renderTexture(Identifier textureLocation) {
     var runtimeTexture = runtimeTexture(textureLocation);
     return runtimeTexture != null ? runtimeTexture : texture(textureLocation);
-  }
-
-  public TextureImage waterOverlayTexture() {
-    return texture(Identifier.withDefaultNamespace("block/water_overlay"));
-  }
-
-  public TextureImage remoteTexture(String url) {
-    return textureCache.computeIfAbsent("url:" + url, _ -> {
-      try {
-        var connection = URI.create(url).toURL().openConnection();
-        connection.setConnectTimeout(2_000);
-        connection.setReadTimeout(3_000);
-        try (var stream = connection.getInputStream()) {
-          return TextureImage.from(ImageIO.read(stream), null);
-        }
-      } catch (Throwable t) {
-        log.debug("Failed to download renderer texture {}", url, t);
-        return MISSING_TEXTURE;
-      }
-    });
   }
 
   public int resolveTint(ClientLevel level, BlockPos pos, BlockState state, int tintIndex) {
@@ -328,252 +231,6 @@ public final class RendererAssets {
     return matrix;
   }
 
-  public enum EntityLod {
-    NEAR,
-    MEDIUM,
-    FAR
-  }
-
-  public List<GeometryFace> entityModel(Entity entity, TextureImage texture, EntityLod lod) {
-    if (lod == EntityLod.FAR) {
-      return List.of();
-    }
-
-    var vanillaModel = tryBuildVanillaLivingModel(entity, texture, entity instanceof AbstractClientPlayer ? 0.9375F : 1.0F);
-    if (!vanillaModel.isEmpty()) {
-      return vanillaModel;
-    }
-    if (entity instanceof AbstractClientPlayer player) {
-      RenderDebugTrace.current().vanillaPlayerModelFallback(player.getUUID().toString());
-    } else if (entity instanceof LivingEntity) {
-      RenderDebugTrace.current().vanillaLivingModelFallback(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
-    }
-
-    var yaw = (float) Math.toRadians(-entity.getYRot());
-    var transform = new Matrix4f()
-      .translate((float) entity.getX(), (float) entity.getY(), (float) entity.getZ())
-      .rotateY(yaw);
-    if (entity.getBbHeight() > entity.getBbWidth() * 1.25F) {
-      return buildHumanoidApproximation(entity, texture, lod, transform);
-    }
-    if (entity.getBbWidth() > entity.getBbHeight() * 0.9F) {
-      return buildQuadrupedApproximation(entity, texture, lod, transform);
-    }
-    return buildPrismApproximation(entity, texture, lod, transform);
-  }
-
-  private TextureImage playerTexture(AbstractClientPlayer player) {
-    try {
-      return this.texture(player.getSkin().body());
-    } catch (Throwable t) {
-      log.debug("Failed to compose player sprite for {}", player.getUUID(), t);
-      return MISSING_TEXTURE;
-    }
-  }
-
-  private List<GeometryFace> tryBuildVanillaLivingModel(Entity entity, TextureImage texture, float renderScale) {
-    if (!(entity instanceof LivingEntity livingEntity)) {
-      return List.of();
-    }
-
-    try {
-      var dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
-      @SuppressWarnings({"rawtypes"})
-      EntityRenderer rawRenderer = dispatcher.getRenderer(entity);
-      if (!(rawRenderer instanceof LivingEntityRenderer<?, ?, ?> livingRenderer)) {
-        RenderDebugTrace.current().vanillaLivingModelFallback(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), new IllegalStateException("renderer is not LivingEntityRenderer: " + rawRenderer));
-        return List.of();
-      }
-
-      var renderState = (LivingEntityRenderState) rawRenderer.createRenderState(entity, 1.0F);
-      if (renderState == null) {
-        throw new NullPointerException("createRenderState returned null");
-      }
-      @SuppressWarnings("rawtypes")
-      var rawLivingRenderer = (LivingEntityRenderer) livingRenderer;
-      var model = rawLivingRenderer.getModel();
-      if (model == null) {
-        throw new NullPointerException("renderer model is null");
-      }
-
-      var bodyVisible = !renderState.isInvisible;
-      var translucentBody = !bodyVisible && !renderState.isInvisibleToPlayer;
-      if (!bodyVisible && !translucentBody && !renderState.appearsGlowing()) {
-        return List.of();
-      }
-
-      model.setupAnim(renderState);
-
-      var renderOffset = renderState.passengerOffset != null ? renderState.passengerOffset : Vec3.ZERO;
-      var poseStack = new PoseStack();
-      applyLivingModelPose(
-        poseStack,
-        livingEntity.getX() + renderOffset.x,
-        livingEntity.getY() + renderOffset.y,
-        livingEntity.getZ() + renderOffset.z,
-        renderState,
-        renderScale
-      );
-      var faces = extractModelGeometry(model, poseStack, texture, translucentBody ? AlphaMode.TRANSLUCENT : AlphaMode.CUTOUT);
-      if (!faces.isEmpty()) {
-        if (entity instanceof AbstractClientPlayer player) {
-          RenderDebugTrace.current().vanillaPlayerModelHit(player.getUUID().toString());
-        } else {
-          RenderDebugTrace.current().vanillaLivingModelHit(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
-        }
-      }
-      return faces;
-    } catch (Throwable t) {
-      if (entity instanceof AbstractClientPlayer player) {
-        RenderDebugTrace.current().vanillaPlayerModelFallback(player.getUUID().toString(), t);
-      } else {
-        RenderDebugTrace.current().vanillaLivingModelFallback(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), t);
-      }
-      log.debug("Failed to build vanilla living model for {}", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()), t);
-      return List.of();
-    }
-  }
-
-  private void applyLivingModelPose(
-    PoseStack poseStack,
-    double worldX,
-    double worldY,
-    double worldZ,
-    LivingEntityRenderState renderState,
-    float renderScale
-  ) {
-    poseStack.translate(worldX, worldY, worldZ);
-    poseStack.scale(renderState.scale, renderState.scale, renderState.scale);
-    applyLivingEntityRotations(renderState, poseStack, renderState.bodyRot, renderState.scale);
-    poseStack.scale(-1.0F, -1.0F, 1.0F);
-    poseStack.scale(renderScale, renderScale, renderScale);
-    poseStack.translate(0.0F, -1.501F, 0.0F);
-  }
-
-  private void applyLivingEntityRotations(LivingEntityRenderState renderState, PoseStack poseStack, float bodyRot, float scale) {
-    if (renderState.isFullyFrozen) {
-      bodyRot += (float) (Math.cos(Mth.floor(renderState.ageInTicks) * 3.25F) * Math.PI * 0.4F);
-    }
-
-    if (!renderState.hasPose(Pose.SLEEPING)) {
-      poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - bodyRot));
-    }
-
-    if (renderState.deathTime > 0.0F) {
-      var progress = (renderState.deathTime - 1.0F) / 20.0F * 1.6F;
-      progress = Mth.sqrt(progress);
-      if (progress > 1.0F) {
-        progress = 1.0F;
-      }
-      poseStack.mulPose(Axis.ZP.rotationDegrees(progress * 90.0F));
-    } else if (renderState.isAutoSpinAttack) {
-      poseStack.mulPose(Axis.XP.rotationDegrees(-90.0F - renderState.xRot));
-      poseStack.mulPose(Axis.YP.rotationDegrees(renderState.ageInTicks * -75.0F));
-    } else if (renderState.hasPose(Pose.SLEEPING)) {
-      var sleepRotation = renderState.bedOrientation != null ? sleepDirectionToRotation(renderState.bedOrientation) : bodyRot;
-      poseStack.mulPose(Axis.YP.rotationDegrees(sleepRotation));
-      poseStack.mulPose(Axis.ZP.rotationDegrees(90.0F));
-      poseStack.mulPose(Axis.YP.rotationDegrees(270.0F));
-    } else if (renderState.isUpsideDown) {
-      poseStack.translate(0.0F, (renderState.boundingBoxHeight + 0.1F) / scale, 0.0F);
-      poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
-    }
-  }
-
-  private float sleepDirectionToRotation(Direction facing) {
-    return switch (facing) {
-      case SOUTH -> 90.0F;
-      case WEST -> 0.0F;
-      case NORTH -> 270.0F;
-      case EAST -> 180.0F;
-      default -> 0.0F;
-    };
-  }
-
-  private List<GeometryFace> extractModelGeometry(EntityModel<?> model, PoseStack poseStack, TextureImage texture, AlphaMode alphaMode) {
-    var faces = new ArrayList<GeometryFace>();
-    model.root().visit(poseStack, (pose, _, _, cube) -> {
-      for (var polygon : cube.polygons) {
-        var vertices = new Vector3f[4];
-        var uv = new float[8];
-        for (var i = 0; i < polygon.vertices().length; i++) {
-          var vertex = polygon.vertices()[i];
-          vertices[i] = pose.pose().transformPosition(vertex.x() / 16.0F, vertex.y() / 16.0F, vertex.z() / 16.0F, new Vector3f());
-          uv[i * 2] = vertex.u();
-          uv[i * 2 + 1] = vertex.v();
-        }
-        faces.add(GeometryFace.of(vertices, uv, texture, alphaMode, null, -1, 0, true));
-      }
-    });
-    return faces;
-  }
-
-  private List<GeometryFace> buildHumanoidApproximation(Entity entity, TextureImage texture, EntityLod lod, Matrix4f transform) {
-    var faces = new ArrayList<GeometryFace>();
-    var width = Math.max(0.35F, entity.getBbWidth());
-    var height = Math.max(1.0F, entity.getBbHeight());
-    var headHeight = Math.min(0.38F, height * 0.24F);
-    var bodyHeight = height * 0.45F;
-    var legHeight = height - bodyHeight - headHeight;
-    var torsoWidth = width * 0.7F;
-    var legWidth = torsoWidth * 0.38F;
-    var armWidth = torsoWidth * 0.28F;
-
-    addCuboid(faces, -torsoWidth * 0.5F, legHeight, -width * 0.22F, torsoWidth * 0.5F, legHeight + bodyHeight, width * 0.22F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    addCuboid(faces, -width * 0.32F, legHeight + bodyHeight, -width * 0.32F, width * 0.32F, height, width * 0.32F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    addCuboid(faces, -torsoWidth * 0.5F - armWidth, legHeight + bodyHeight * 0.1F, -width * 0.18F, -torsoWidth * 0.5F, legHeight + bodyHeight * 0.95F, width * 0.18F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    if (lod == EntityLod.NEAR) {
-      addCuboid(faces, torsoWidth * 0.5F, legHeight + bodyHeight * 0.1F, -width * 0.18F, torsoWidth * 0.5F + armWidth, legHeight + bodyHeight * 0.95F, width * 0.18F,
-        texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    }
-    addCuboid(faces, -legWidth - 0.02F, 0.0F, -width * 0.16F, -0.02F, legHeight, width * 0.16F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    addCuboid(faces, 0.02F, 0.0F, -width * 0.16F, legWidth + 0.02F, legHeight, width * 0.16F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    return faces;
-  }
-
-  private List<GeometryFace> buildQuadrupedApproximation(Entity entity, TextureImage texture, EntityLod lod, Matrix4f transform) {
-    var faces = new ArrayList<GeometryFace>();
-    var width = Math.max(0.5F, entity.getBbWidth());
-    var height = Math.max(0.45F, entity.getBbHeight());
-    var legHeight = height * 0.4F;
-    var bodyMinY = legHeight;
-    var bodyMaxY = height * 0.88F;
-    var bodyHalfLength = width * 0.48F;
-    var bodyHalfWidth = width * 0.26F;
-    addCuboid(faces, -bodyHalfWidth, bodyMinY, -bodyHalfLength, bodyHalfWidth, bodyMaxY, bodyHalfLength,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    addCuboid(faces, -bodyHalfWidth * 0.75F, bodyMaxY - height * 0.18F, bodyHalfLength - width * 0.05F, bodyHalfWidth * 0.75F, height, bodyHalfLength + width * 0.18F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    var legHalf = width * 0.08F;
-    var legZ = bodyHalfLength * 0.65F;
-    var legX = bodyHalfWidth * 0.72F;
-    addCuboid(faces, -legX - legHalf, 0.0F, -legZ - legHalf, -legX + legHalf, legHeight, -legZ + legHalf, texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    addCuboid(faces, legX - legHalf, 0.0F, -legZ - legHalf, legX + legHalf, legHeight, -legZ + legHalf, texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    if (lod == EntityLod.NEAR) {
-      addCuboid(faces, -legX - legHalf, 0.0F, legZ - legHalf, -legX + legHalf, legHeight, legZ + legHalf, texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-      addCuboid(faces, legX - legHalf, 0.0F, legZ - legHalf, legX + legHalf, legHeight, legZ + legHalf, texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    }
-    return faces;
-  }
-
-  private List<GeometryFace> buildPrismApproximation(Entity entity, TextureImage texture, EntityLod lod, Matrix4f transform) {
-    var faces = new ArrayList<GeometryFace>();
-    var width = Math.max(0.35F, entity.getBbWidth() * 0.92F);
-    var height = Math.max(0.4F, entity.getBbHeight());
-    addCuboid(faces, -width * 0.5F, 0.0F, -width * 0.5F, width * 0.5F, height, width * 0.5F,
-      texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    if (lod == EntityLod.NEAR && height > width * 1.2F) {
-      addCuboid(faces, -width * 0.35F, height * 0.65F, -width * 0.35F, width * 0.35F, height, width * 0.35F,
-        texture, AlphaMode.CUTOUT, simpleUvSet(), transform, true);
-    }
-    return faces;
-  }
-
   private BlockGeometry buildBlockGeometry(BlockState state) {
     return buildVanillaBlockGeometry(state);
   }
@@ -663,44 +320,6 @@ public final class RendererAssets {
     );
   }
 
-  private BlockGeometry fallbackCube(BlockState state) {
-    var blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-    var texture = textureFromParticle(state);
-    if (texture == MISSING_TEXTURE) {
-      texture = texture(blockId.withPrefix("block/"));
-    }
-
-    var faces = new ArrayList<GeometryFace>();
-    var alphaMode = chooseAlphaMode(state, texture, blockId.getPath(), false);
-    for (var direction : Direction.values()) {
-      faces.add(createAxisAlignedFace(direction, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, new UVRect(0.0F, 0.0F, 1.0F, 1.0F), texture, alphaMode, -1, 0, true));
-    }
-    return new BlockGeometry(faces);
-  }
-
-  private TextureImage textureFromParticle(BlockState state) {
-    try {
-      var particleMaterial = Minecraft.getInstance().getModelManager().getBlockStateModelSet().getParticleMaterial(state);
-      if (particleMaterial != null) {
-        var sprite = particleMaterial.sprite();
-        if (sprite != null && sprite.contents() != null && sprite.contents().name() != null) {
-          return texture(sprite.contents().name());
-        }
-      }
-    } catch (Throwable t) {
-      log.debug("Failed to resolve vanilla particle material for {}", BuiltInRegistries.BLOCK.getKey(state.getBlock()), t);
-    }
-
-    var blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-    var resolvedModel = resolveModel(blockId.withPrefix("block/"));
-    if (resolvedModel == null) {
-      return MISSING_TEXTURE;
-    }
-
-    var particle = resolveTextureReference("#particle", resolvedModel.textures);
-    return particle != null ? texture(particle.sprite()) : MISSING_TEXTURE;
-  }
-
   @Nullable
   private ResolvedModel resolveModel(Identifier modelLocation) {
     var cached = modelCache.get(modelLocation);
@@ -715,7 +334,7 @@ public final class RendererAssets {
     return loaded;
   }
 
-  private BakedModel bakeResolvedModel(ResolvedModel resolvedModel, BlockRenderContext context, int xRotation, int yRotation) {
+  private BakedModel bakeResolvedModel(ResolvedModel resolvedModel, BlockState state, int xRotation, int yRotation) {
     var faces = new ArrayList<GeometryFace>();
     for (var element : resolvedModel.elements) {
       for (var entry : element.faces.entrySet()) {
@@ -731,7 +350,7 @@ public final class RendererAssets {
           uv,
           texture,
           chooseAlphaMode(
-            context.state,
+            state,
             texture,
             textureLocation != null ? textureLocation.sprite().getPath() : "",
             textureLocation != null && textureLocation.forceTranslucent()
@@ -832,91 +451,6 @@ public final class RendererAssets {
     return rotatedIndex == 0 || rotatedIndex == 3 ? rect.minV : rect.maxV;
   }
 
-  private void addCuboid(
-    List<GeometryFace> faces,
-    float minX,
-    float minY,
-    float minZ,
-    float maxX,
-    float maxY,
-    float maxZ,
-    TextureImage texture,
-    AlphaMode alphaMode,
-    Map<Direction, UVRect> uvByFace,
-    Matrix4fc transform,
-    boolean shade) {
-
-    for (var direction : Direction.values()) {
-      var face = createAxisAlignedFace(
-        direction,
-        minX + 0.5F,
-        minY,
-        minZ + 0.5F,
-        maxX + 0.5F,
-        maxY,
-        maxZ + 0.5F,
-        uvByFace.getOrDefault(direction, new UVRect(0.0F, 0.0F, 1.0F, 1.0F)),
-        texture,
-        alphaMode,
-        -1,
-        0,
-        shade
-      );
-      faces.add(face.transformed(transform));
-    }
-  }
-
-  private Map<Direction, UVRect> simpleUvSet() {
-    return cuboidUvSet(
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F),
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F),
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F),
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F),
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F),
-      new UVRect(0.0F, 0.0F, 1.0F, 1.0F)
-    );
-  }
-
-  private Map<Direction, UVRect> cuboidUvSet(UVRect down, UVRect up, UVRect north, UVRect south, UVRect west, UVRect east) {
-    var faces = new HashMap<Direction, UVRect>();
-    faces.put(Direction.DOWN, down);
-    faces.put(Direction.UP, up);
-    faces.put(Direction.NORTH, north);
-    faces.put(Direction.SOUTH, south);
-    faces.put(Direction.WEST, west);
-    faces.put(Direction.EAST, east);
-    return faces;
-  }
-
-  private GeometryFace createAxisAlignedFace(
-    Direction facing,
-    float minX,
-    float minY,
-    float minZ,
-    float maxX,
-    float maxY,
-    float maxZ,
-    UVRect uv,
-    TextureImage texture,
-    AlphaMode alphaMode,
-    int tintIndex,
-    int emission,
-    boolean shade) {
-
-    var from = new Vector3f(minX * 16.0F, minY * 16.0F, minZ * 16.0F);
-    var to = new Vector3f(maxX * 16.0F, maxY * 16.0F, maxZ * 16.0F);
-    return bakeFace(
-      new ModelElement(from, to, Map.of(facing, new FaceSpec("#particle", uv, tintIndex, 0)), null, shade, emission),
-      new FaceSpec("#particle", uv, tintIndex, 0),
-      facing,
-      uv,
-      texture,
-      alphaMode,
-      0,
-      0
-    );
-  }
-
   private AlphaMode chooseAlphaMode(BlockState state, TextureImage texture, String textureHint, boolean forceTranslucent) {
     if (forceTranslucent) {
       return AlphaMode.TRANSLUCENT;
@@ -977,106 +511,6 @@ public final class RendererAssets {
     return null;
   }
 
-  private BlockStateDefinition loadBlockStateDefinition(Identifier blockId) {
-    var json = loadJson(blockId.withPrefix("blockstates/"));
-    if (json == null) {
-      return BlockStateDefinition.EMPTY;
-    }
-
-    var variants = new ArrayList<VariantDefinition>();
-    var multipart = new ArrayList<MultipartDefinition>();
-    if (json.has("variants")) {
-      for (var entry : json.getAsJsonObject("variants").entrySet()) {
-        variants.add(new VariantDefinition(parseVariantCondition(entry.getKey()), parseModelReferences(entry.getValue())));
-      }
-    }
-    if (json.has("multipart")) {
-      for (var part : json.getAsJsonArray("multipart")) {
-        var partObject = part.getAsJsonObject();
-        multipart.add(new MultipartDefinition(parseMultipartCondition(partObject.get("when")), parseModelReferences(partObject.get("apply"))));
-      }
-    }
-    return new BlockStateDefinition(variants, multipart);
-  }
-
-  private List<ModelReference> parseModelReferences(JsonElement jsonElement) {
-    if (jsonElement.isJsonArray()) {
-      var references = new ArrayList<ModelReference>();
-      for (var element : jsonElement.getAsJsonArray()) {
-        references.add(parseSingleModelReference(element.getAsJsonObject()));
-      }
-      return references.isEmpty() ? List.of() : List.of(selectWeightedReference(references));
-    }
-
-    return List.of(parseSingleModelReference(jsonElement.getAsJsonObject()));
-  }
-
-  private ModelReference selectWeightedReference(List<ModelReference> references) {
-    return references.stream().max(Comparator.comparingInt(left -> left.weight)).orElse(references.getFirst());
-  }
-
-  private ModelReference parseSingleModelReference(JsonObject jsonObject) {
-    return new ModelReference(
-      Identifier.parse(jsonObject.get("model").getAsString()),
-      jsonObject.has("x") ? jsonObject.get("x").getAsInt() : 0,
-      jsonObject.has("y") ? jsonObject.get("y").getAsInt() : 0,
-      jsonObject.has("uvlock") && jsonObject.get("uvlock").getAsBoolean(),
-      jsonObject.has("weight") ? jsonObject.get("weight").getAsInt() : 1
-    );
-  }
-
-  private Condition parseVariantCondition(String key) {
-    if (key == null || key.isBlank()) {
-      return Condition.ALWAYS;
-    }
-
-    var expected = new LinkedHashMap<String, List<String>>();
-    for (var part : key.split(",")) {
-      var split = part.split("=", 2);
-      if (split.length != 2) {
-        continue;
-      }
-      expected.put(split[0], Arrays.asList(split[1].split("\\|")));
-    }
-    return new StateCondition(expected);
-  }
-
-  private Condition parseMultipartCondition(@Nullable JsonElement whenElement) {
-    if (whenElement == null || whenElement.isJsonNull()) {
-      return Condition.ALWAYS;
-    }
-
-    if (whenElement.isJsonArray()) {
-      var conditions = new ArrayList<Condition>();
-      for (var element : whenElement.getAsJsonArray()) {
-        conditions.add(parseMultipartCondition(element));
-      }
-      return new AnyCondition(conditions);
-    }
-
-    var jsonObject = whenElement.getAsJsonObject();
-    if (jsonObject.has("OR")) {
-      var conditions = new ArrayList<Condition>();
-      for (var element : jsonObject.getAsJsonArray("OR")) {
-        conditions.add(parseMultipartCondition(element));
-      }
-      return new AnyCondition(conditions);
-    }
-    if (jsonObject.has("AND")) {
-      var conditions = new ArrayList<Condition>();
-      for (var element : jsonObject.getAsJsonArray("AND")) {
-        conditions.add(parseMultipartCondition(element));
-      }
-      return new AllCondition(conditions);
-    }
-
-    var expected = new LinkedHashMap<String, List<String>>();
-    for (var entry : jsonObject.entrySet()) {
-      expected.put(entry.getKey(), Arrays.asList(entry.getValue().getAsString().split("\\|")));
-    }
-    return new StateCondition(expected);
-  }
-
   @Nullable
   private ResolvedModel loadModel(Identifier modelLocation) {
     var json = loadJson(modelLocation.withPrefix("models/"));
@@ -1099,12 +533,11 @@ public final class RendererAssets {
       }
     }
 
-    var ambientOcclusion = !json.has("ambientocclusion") || json.get("ambientocclusion").getAsBoolean();
     List<ModelElement> elements = parent != null ? parent.elements : List.of();
     if (json.has("elements")) {
       elements = parseModelElements(json.getAsJsonArray("elements"));
     }
-    return new ResolvedModel(textures, elements, ambientOcclusion);
+    return new ResolvedModel(textures, elements);
   }
 
   @Nullable
@@ -1378,10 +811,6 @@ public final class RendererAssets {
     public static final BlockGeometry EMPTY = new BlockGeometry(List.of());
   }
 
-  public record FluidGeometry(TextureImage stillTexture, TextureImage flowTexture, AlphaMode alphaMode, int emission, float surfaceHeight, float ownHeight) {
-    public static final FluidGeometry EMPTY = new FluidGeometry(MISSING_TEXTURE, MISSING_TEXTURE, AlphaMode.TRANSLUCENT, 0, 0.0F, 0.0F);
-  }
-
   public record GeometryFace(
     double[] x,
     double[] y,
@@ -1638,85 +1067,11 @@ public final class RendererAssets {
     public record AlphaCoverage(boolean hasAlpha, boolean hasTranslucentPixels) {}
   }
 
-  private interface Condition {
-    Condition ALWAYS = _ -> true;
-
-    boolean matches(BlockState state);
-  }
-
-  private record StateCondition(Map<String, List<String>> expected) implements Condition {
-    @Override
-    public boolean matches(BlockState state) {
-      for (var entry : expected.entrySet()) {
-        Property<?> property = null;
-        for (var candidate : state.getProperties()) {
-          if (candidate.getName().equals(entry.getKey())) {
-            property = candidate;
-            break;
-          }
-        }
-        if (property == null) {
-          return false;
-        }
-
-        var actual = propertyValueName(state, property);
-        if (entry.getValue().stream().noneMatch(actual::equals)) {
-          return false;
-        }
-      }
-      return true;
-    }
-  }
-
-  private record AnyCondition(List<Condition> children) implements Condition {
-    @Override
-    public boolean matches(BlockState state) {
-      return children.stream().anyMatch(child -> child.matches(state));
-    }
-  }
-
-  private record AllCondition(List<Condition> children) implements Condition {
-    @Override
-    public boolean matches(BlockState state) {
-      return children.stream().allMatch(child -> child.matches(state));
-    }
-  }
-
-  private record BlockStateDefinition(List<VariantDefinition> variants, List<MultipartDefinition> multipart) {
-    private static final BlockStateDefinition EMPTY = new BlockStateDefinition(List.of(), List.of());
-
-    public List<ModelReference> select(BlockState state) {
-      var selected = new ArrayList<ModelReference>();
-      for (var variant : variants) {
-        if (variant.condition.matches(state)) {
-          selected.addAll(variant.references);
-        }
-      }
-      for (var part : multipart) {
-        if (part.condition.matches(state)) {
-          selected.addAll(part.references);
-        }
-      }
-      return selected;
-    }
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private static String propertyValueName(BlockState state, Property<?> property) {
-    return ((Property) property).getName(state.getValue((Property) property));
-  }
-
-  private record VariantDefinition(Condition condition, List<ModelReference> references) {}
-
-  private record MultipartDefinition(Condition condition, List<ModelReference> references) {}
-
-  private record ModelReference(Identifier model, int xRotation, int yRotation, boolean uvLock, int weight) {}
-
   private record TextureBinding(String target, boolean forceTranslucent) {}
 
   private record ResolvedTexture(Identifier sprite, boolean forceTranslucent) {}
 
-  private record ResolvedModel(Map<String, TextureBinding> textures, List<ModelElement> elements, boolean ambientOcclusion) {}
+  private record ResolvedModel(Map<String, TextureBinding> textures, List<ModelElement> elements) {}
 
   private record ModelElement(
     Vector3f from,
@@ -1734,43 +1089,4 @@ public final class RendererAssets {
   private record UVRect(float minU, float minV, float maxU, float maxV) {}
 
   private record BakedModel(List<GeometryFace> faces) {}
-
-  private record BlockRenderContext(BlockState state, @Nullable ItemStack itemStack) {
-    public static BlockRenderContext forBlock(BlockState state) {
-      return new BlockRenderContext(state, null);
-    }
-
-    public static BlockRenderContext forItem(ItemStack itemStack) {
-      return new BlockRenderContext(Blocks.AIR.defaultBlockState(), itemStack);
-    }
-  }
-
-  private static final class EmptyBlockGetterProxy implements BlockGetter {
-    private static final EmptyBlockGetterProxy INSTANCE = new EmptyBlockGetterProxy();
-
-    @Override
-    public BlockEntity getBlockEntity(BlockPos pos) {
-      return null;
-    }
-
-    @Override
-    public BlockState getBlockState(BlockPos pos) {
-      return Blocks.AIR.defaultBlockState();
-    }
-
-    @Override
-    public FluidState getFluidState(BlockPos pos) {
-      return Fluids.EMPTY.defaultFluidState();
-    }
-
-    @Override
-    public int getHeight() {
-      return 384;
-    }
-
-    @Override
-    public int getMinY() {
-      return -64;
-    }
-  }
 }
