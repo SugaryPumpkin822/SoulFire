@@ -575,7 +575,7 @@ public final class InventoryItemIconRenderer {
     var centerX = width * 0.5F;
     var centerY = height * 0.5F;
     var screenX = centerX + vertex.x() * GUI_PIXELS_PER_UNIT;
-    var screenY = centerY - vertex.y() * GUI_PIXELS_PER_UNIT;
+    var screenY = centerY + vertex.y() * GUI_PIXELS_PER_UNIT;
     var depth = -vertex.z() + depthBias;
     return new ProjectedVertex(
       screenX,

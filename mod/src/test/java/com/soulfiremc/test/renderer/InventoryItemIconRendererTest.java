@@ -18,6 +18,10 @@
 package com.soulfiremc.test.renderer;
 
 import com.soulfiremc.server.renderer.InventoryItemIconRenderer;
+import com.soulfiremc.server.renderer.RenderMaterial;
+import com.soulfiremc.server.renderer.RenderQuad;
+import com.soulfiremc.server.renderer.RenderVertex;
+import com.soulfiremc.server.renderer.RendererAssets;
 import com.soulfiremc.test.utils.TestBootstrap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
@@ -34,6 +38,7 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.util.Base64;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -131,6 +136,37 @@ class InventoryItemIconRendererTest {
     assertTrue(centerAlpha > 0);
   }
 
+  @Test
+  void projectsVanillaGuiYDownQuadsWithoutFlippingTexture() throws Exception {
+    var texture = RendererAssets.TextureImage.fromArgb(
+      2,
+      2,
+      new int[]{
+        0xFFFF0000, 0xFFFF0000,
+        0xFF0000FF, 0xFF0000FF
+      },
+      null
+    );
+    var quad = new RenderQuad(
+      new RenderVertex(-0.5F, -0.5F, 0.0F, 0.0F, 0.0F, 0xFFFFFFFF),
+      new RenderVertex(-0.5F, 0.5F, 0.0F, 0.0F, 1.0F, 0xFFFFFFFF),
+      new RenderVertex(0.5F, 0.5F, 0.0F, 1.0F, 1.0F, 0xFFFFFFFF),
+      new RenderVertex(0.5F, -0.5F, 0.0F, 1.0F, 0.0F, 0xFFFFFFFF),
+      RenderMaterial.create(texture, RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, true, 0.0F)
+    );
+
+    var sceneClass = Class.forName("com.soulfiremc.server.renderer.InventoryItemIconRenderer$IconScene");
+    var sceneConstructor = sceneClass.getDeclaredConstructor(List.class, List.class, boolean.class);
+    sceneConstructor.setAccessible(true);
+    var scene = sceneConstructor.newInstance(List.of(quad), List.of(texture), false);
+    var renderFrame = InventoryItemIconRenderer.class.getDeclaredMethod("renderFrame", sceneClass, long.class);
+    renderFrame.setAccessible(true);
+    var image = (BufferedImage) renderFrame.invoke(null, scene, 0L);
+
+    assertRedDominant(image.getRGB(image.getWidth() / 2, image.getHeight() / 2 - 4));
+    assertBlueDominant(image.getRGB(image.getWidth() / 2, image.getHeight() / 2 + 4));
+  }
+
   private static Rectangle visibleBounds(BufferedImage image) {
     int minX = Integer.MAX_VALUE;
     int minY = Integer.MAX_VALUE;
@@ -153,5 +189,17 @@ class InventoryItemIconRendererTest {
       return null;
     }
     return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+  }
+
+  private static void assertRedDominant(int color) {
+    var red = (color >> 16) & 0xFF;
+    var blue = color & 0xFF;
+    assertTrue(red > blue, () -> "Expected red-dominant pixel, got 0x" + Integer.toHexString(color));
+  }
+
+  private static void assertBlueDominant(int color) {
+    var red = (color >> 16) & 0xFF;
+    var blue = color & 0xFF;
+    assertTrue(blue > red, () -> "Expected blue-dominant pixel, got 0x" + Integer.toHexString(color));
   }
 }
