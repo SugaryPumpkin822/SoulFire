@@ -193,7 +193,8 @@ public final class RendererAssets {
   }
 
   public TextureImage texture(ClientAsset.Texture textureAsset) {
-    return texture(textureAsset.texturePath());
+    var texturePath = textureAsset.texturePath();
+    return isRuntimeClientTexturePath(texturePath) ? renderTexture(texturePath) : texture(texturePath);
   }
 
   public TextureImage texture(Identifier textureLocation) {
@@ -1304,6 +1305,13 @@ public final class RendererAssets {
     return textureLocation.withPath("textures/" + path + ".png");
   }
 
+  static boolean isRuntimeClientTexturePath(Identifier textureLocation) {
+    var path = textureLocation.getPath();
+    return path.startsWith("skins/")
+      || path.startsWith("capes/")
+      || path.startsWith("elytra/");
+  }
+
   public enum AlphaMode {
     OPAQUE,
     CUTOUT,
@@ -1506,6 +1514,59 @@ public final class RendererAssets {
       return hasTranslucentPixels;
     }
 
+    public AlphaCoverage alphaCoverage(float[] uv) {
+      if (uv == null || uv.length < 2 || pixels.length == 0 || width <= 0) {
+        return new AlphaCoverage(hasAlpha, hasTranslucentPixels);
+      }
+
+      var minU = Float.POSITIVE_INFINITY;
+      var maxU = Float.NEGATIVE_INFINITY;
+      var minV = Float.POSITIVE_INFINITY;
+      var maxV = Float.NEGATIVE_INFINITY;
+      for (var i = 0; i + 1 < uv.length; i += 2) {
+        var u = uv[i];
+        var v = uv[i + 1];
+        if (!Float.isFinite(u) || !Float.isFinite(v)) {
+          return new AlphaCoverage(hasAlpha, hasTranslucentPixels);
+        }
+
+        minU = Math.min(minU, u);
+        maxU = Math.max(maxU, u);
+        minV = Math.min(minV, v);
+        maxV = Math.max(maxV, v);
+      }
+
+      if (minU < 0.0F || minV < 0.0F || maxU > 1.0F || maxV > 1.0F || maxU - minU > 1.0F || maxV - minV > 1.0F) {
+        return new AlphaCoverage(hasAlpha, hasTranslucentPixels);
+      }
+
+      var availableHeight = Math.max(1, pixels.length / width);
+      var clampedFrameHeight = Math.clamp(frameHeight, 1, availableHeight);
+      var availableFrameCount = Math.max(1, availableHeight / clampedFrameHeight);
+      var x0 = Math.clamp((int) Math.floor(minU * width), 0, width - 1);
+      var x1 = Math.clamp((int) Math.ceil(maxU * width) - 1, x0, width - 1);
+      var y0 = Math.clamp((int) Math.floor(minV * clampedFrameHeight), 0, clampedFrameHeight - 1);
+      var y1 = Math.clamp((int) Math.ceil(maxV * clampedFrameHeight) - 1, y0, clampedFrameHeight - 1);
+      var coveredHasAlpha = false;
+      for (var frame = 0; frame < availableFrameCount; frame++) {
+        var yOffset = frame * clampedFrameHeight;
+        for (var y = y0; y <= y1; y++) {
+          var rowOffset = (yOffset + y) * width;
+          for (var x = x0; x <= x1; x++) {
+            var alpha = (pixels[rowOffset + x] >>> 24) & 0xFF;
+            if (alpha < 255) {
+              coveredHasAlpha = true;
+              if (alpha > 0) {
+                return new AlphaCoverage(true, true);
+              }
+            }
+          }
+        }
+      }
+
+      return new AlphaCoverage(coveredHasAlpha, false);
+    }
+
     public BufferedImage toBufferedImage() {
       if (bufferedImage == null) {
         bufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
@@ -1513,6 +1574,8 @@ public final class RendererAssets {
       }
       return bufferedImage;
     }
+
+    public record AlphaCoverage(boolean hasAlpha, boolean hasTranslucentPixels) {}
   }
 
   private interface Condition {

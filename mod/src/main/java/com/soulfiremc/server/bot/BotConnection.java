@@ -71,6 +71,10 @@ import net.minecraft.client.multiplayer.chat.ChatListener;
 import net.minecraft.client.multiplayer.chat.report.ReportEnvironment;
 import net.minecraft.client.multiplayer.chat.report.ReportingContext;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.client.player.LocalPlayerResolver;
+import net.minecraft.client.renderer.PlayerSkinRenderCache;
+import net.minecraft.client.renderer.texture.SkinTextureDownloader;
+import net.minecraft.client.resources.SkinManager;
 import net.minecraft.client.resources.server.DownloadedPackSource;
 import net.minecraft.network.PacketProcessor;
 import net.minecraft.server.network.EventLoopGroupHolder;
@@ -202,6 +206,15 @@ public final class BotConnection {
       newInstance.gameDirectory.toPath().resolve("downloads"),
       userData
     );
+    var skinTextureDownloader = new SkinTextureDownloader(javaProxy, newInstance.getTextureManager(), newInstance);
+    newInstance.skinManager = new SkinManager(
+      ((IMinecraft) newInstance).soulfire$getGameConfig().location.assetDirectory.toPath().resolve("skins"),
+      newInstance.services(),
+      skinTextureDownloader,
+      newInstance
+    );
+    var localProfileResolver = new LocalPlayerResolver(newInstance, newInstance.services().profileResolver());
+    newInstance.playerSkinRenderCache = new PlayerSkinRenderCache(newInstance.getTextureManager(), newInstance.getSkinManager(), localProfileResolver);
 
     ((IMinecraft) newInstance).soulfire$setConnection(this);
 

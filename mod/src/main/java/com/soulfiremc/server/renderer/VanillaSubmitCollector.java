@@ -387,7 +387,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     var faceEmission = emission >= 0 && emission <= 15 ? emission : 0;
     var outlineColor = emission > 15 || emission < 0 ? emission : 0;
 
-    var alphaMode = alphaMode(renderType, texture);
+    var alphaMode = alphaMode(renderType, texture, color);
     model.setupAnim(state);
     appendModelPartGeometry(
       model.root(),
@@ -425,7 +425,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     var faceEmission = emission >= 0 && emission <= 15 ? emission : 0;
     var outlineColor = emission > 15 || emission < 0 ? emission : 0;
 
-    var alphaMode = alphaMode(renderType, texture);
+    var alphaMode = alphaMode(renderType, texture, color);
     appendModelPartGeometry(
       modelPart,
       poseStack,
@@ -514,7 +514,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   @Override
   public void submitCustomGeometry(PoseStack poseStack, RenderType renderType, SubmitNodeCollector.CustomGeometryRenderer renderer) {
     var texture = textureFromRenderType(renderType);
-    var alphaMode = alphaMode(renderType, texture);
+    var alphaMode = alphaMode(renderType, texture, 0xFFFFFFFF);
     var consumer = new CapturingVertexConsumer(
       poseStack.last().pose(),
       renderType.mode(),
@@ -586,7 +586,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
           uv[i * 2 + 1] = vertex.v();
         }
 
-        var face = RendererAssets.GeometryFace.of(vertices, uv, texture, alphaMode, null, -1, emission, true);
+        var faceAlphaMode = glint ? alphaMode : alphaMode(renderType, texture, color, uv);
+        var faceAlphaCutoutThreshold = glint ? alphaCutoutThreshold : alphaCutoutThreshold(renderType, faceAlphaMode);
+        var face = RendererAssets.GeometryFace.of(vertices, uv, texture, faceAlphaMode, null, -1, emission, true);
         var quad = WorldMeshCollector.toRenderQuad(
           face,
           0.0,
@@ -595,7 +597,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
           color,
           false,
           0.0F,
-          alphaCutoutThreshold
+          faceAlphaCutoutThreshold
         );
         builder.add(glint ? withMaterial(quad, glintMaterial(texture, sheeted)) : withRenderState(quad, renderType));
         if (outlineVertices != null) {
@@ -631,7 +633,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
 
     var effectiveRenderType = renderType != null ? renderType : quad.materialInfo().itemRenderType();
-    var alphaMode = alphaMode(effectiveRenderType, texture);
+    var alphaMode = alphaMode(effectiveRenderType, texture, color, uv);
     var face = RendererAssets.GeometryFace.of(
       vertices,
       uv,
@@ -809,11 +811,49 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     return -font.width(text) * 0.5F;
   }
 
-  private RendererAssets.AlphaMode alphaMode(@Nullable RenderType renderType, RendererAssets.TextureImage texture) {
-    if (renderType != null && renderType.hasBlending()) {
+  static RendererAssets.AlphaMode alphaMode(@Nullable RenderType renderType, RendererAssets.TextureImage texture, int color) {
+    return alphaMode(renderType, texture, color, null);
+  }
+
+  static RendererAssets.AlphaMode alphaMode(@Nullable RenderType renderType, RendererAssets.TextureImage texture, int color, @Nullable float[] uv) {
+    var coverage = uv != null ? texture.alphaCoverage(uv) : new RendererAssets.TextureImage.AlphaCoverage(texture.hasAlpha(), texture.hasTranslucentPixels());
+    var alpha = (color >>> 24) & 0xFF;
+    if (renderType != null && renderType.hasBlending() && (coverage.hasTranslucentPixels() || isTranslucentAlpha(alpha))) {
       return RendererAssets.AlphaMode.TRANSLUCENT;
     }
-    return texture.hasAlpha() ? RendererAssets.AlphaMode.CUTOUT : RendererAssets.AlphaMode.OPAQUE;
+    return coverage.hasAlpha() || alpha < 255 ? RendererAssets.AlphaMode.CUTOUT : RendererAssets.AlphaMode.OPAQUE;
+  }
+
+  private static RendererAssets.AlphaMode alphaMode(@Nullable RenderType renderType, RendererAssets.TextureImage texture, int[] colors, float[] uv) {
+    var coverage = texture.alphaCoverage(uv);
+    if (renderType != null && renderType.hasBlending() && (coverage.hasTranslucentPixels() || canInterpolateTranslucentAlpha(colors))) {
+      return RendererAssets.AlphaMode.TRANSLUCENT;
+    }
+    return coverage.hasAlpha() || hasNonOpaqueAlpha(colors) ? RendererAssets.AlphaMode.CUTOUT : RendererAssets.AlphaMode.OPAQUE;
+  }
+
+  private static boolean canInterpolateTranslucentAlpha(int[] colors) {
+    var minAlpha = 255;
+    var maxAlpha = 0;
+    for (var color : colors) {
+      var alpha = (color >>> 24) & 0xFF;
+      minAlpha = Math.min(minAlpha, alpha);
+      maxAlpha = Math.max(maxAlpha, alpha);
+    }
+    return isTranslucentAlpha(minAlpha) || isTranslucentAlpha(maxAlpha) || (minAlpha == 0 && maxAlpha == 255);
+  }
+
+  private static boolean hasNonOpaqueAlpha(int[] colors) {
+    for (var color : colors) {
+      if (((color >>> 24) & 0xFF) < 255) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isTranslucentAlpha(int alpha) {
+    return alpha > 0 && alpha < 255;
   }
 
   private RenderQuad withRenderState(RenderQuad quad, @Nullable RenderType renderType) {
@@ -1049,7 +1089,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
 
     private void addCapturedFace(Vector3f[] positions, int[] colors, float[] uv) {
-      var material = RenderMaterial.create(texture, alphaMode, 0xFFFFFFFF, false, 0.0F, alphaCutoutThreshold).withDepthState(depthStencilState);
+      var faceAlphaMode = renderType != null ? alphaMode(renderType, texture, colors, uv) : alphaMode;
+      var faceAlphaCutoutThreshold = renderType != null ? alphaCutoutThreshold(renderType, faceAlphaMode) : alphaCutoutThreshold;
+      var material = RenderMaterial.create(texture, faceAlphaMode, 0xFFFFFFFF, false, 0.0F, faceAlphaCutoutThreshold).withDepthState(depthStencilState);
       if (renderType != null) {
         material = material.withRenderType(renderType);
       }
@@ -1112,7 +1154,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     public VertexConsumer getBuffer(RenderType renderType) {
       return consumers.computeIfAbsent(renderType, type -> {
         var texture = textureFromRenderType(type);
-        var alphaMode = alphaMode(type, texture);
+        var alphaMode = alphaMode(type, texture, 0xFFFFFFFF);
         return new CapturingVertexConsumer(
           new Matrix4f(),
           type.mode(),

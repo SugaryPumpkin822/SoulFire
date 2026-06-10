@@ -23,6 +23,8 @@ accessible field net/minecraft/client/Minecraft user Lnet/minecraft/client/User;
 accessible field net/minecraft/client/Minecraft deltaTracker Lnet/minecraft/client/DeltaTracker$Timer;
 accessible field net/minecraft/client/Minecraft reloadStateTracker Lnet/minecraft/client/ResourceLoadStateTracker;
 accessible field net/minecraft/client/Minecraft downloadedPackSource Lnet/minecraft/client/resources/server/DownloadedPackSource;
+accessible field net/minecraft/client/Minecraft skinManager Lnet/minecraft/client/resources/SkinManager;
+accessible field net/minecraft/client/Minecraft playerSkinRenderCache Lnet/minecraft/client/renderer/PlayerSkinRenderCache;
 accessible field net/minecraft/network/PacketProcessor runningThread Ljava/lang/Thread;
 
 mutable field net/minecraft/client/Minecraft packetProcessor Lnet/minecraft/network/PacketProcessor;
@@ -38,6 +40,8 @@ mutable field net/minecraft/client/Minecraft user Lnet/minecraft/client/User;
 mutable field net/minecraft/client/Minecraft deltaTracker Lnet/minecraft/client/DeltaTracker$Timer;
 mutable field net/minecraft/client/Minecraft reloadStateTracker Lnet/minecraft/client/ResourceLoadStateTracker;
 mutable field net/minecraft/client/Minecraft downloadedPackSource Lnet/minecraft/client/resources/server/DownloadedPackSource;
+mutable field net/minecraft/client/Minecraft skinManager Lnet/minecraft/client/resources/SkinManager;
+mutable field net/minecraft/client/Minecraft playerSkinRenderCache Lnet/minecraft/client/renderer/PlayerSkinRenderCache;
 mutable field net/minecraft/network/PacketProcessor runningThread Ljava/lang/Thread;
 
 accessible class net/minecraft/client/resources/server/ServerPackManager$ServerPackData
