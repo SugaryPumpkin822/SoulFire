@@ -32,34 +32,26 @@ public final class RasterPipeline {
   private static final int TILE_SIZE = 32;
   public void render(RenderContext ctx, SceneData sceneData, RasterBuffers buffers) {
     renderSky(ctx, buffers);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.opaque(), buffers, false);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.cutout(), buffers, false);
-    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.translucent(), buffers, true);
+    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE);
+    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT);
+    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT);
+    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.clouds(), buffers, false, RasterPassKind.TRANSLUCENT);
+    rasterPass(ctx.camera(), ctx.animationTick(), sceneData.weather(), buffers, false, RasterPassKind.TRANSLUCENT);
   }
 
   public void renderSynthetic(Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick, int clearColor) {
     buffers.clearColor(clearColor);
     buffers.clearDepth();
-    rasterPass(camera, animationTick, sceneData.opaque(), buffers, false);
-    rasterPass(camera, animationTick, sceneData.cutout(), buffers, false);
-    rasterPass(camera, animationTick, sceneData.translucent(), buffers, true);
+    rasterPass(camera, animationTick, sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE);
+    rasterPass(camera, animationTick, sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT);
+    rasterPass(camera, animationTick, sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT);
+    rasterPass(camera, animationTick, sceneData.clouds(), buffers, false, RasterPassKind.TRANSLUCENT);
+    rasterPass(camera, animationTick, sceneData.weather(), buffers, false, RasterPassKind.TRANSLUCENT);
   }
 
   private void renderSky(RenderContext ctx, RasterBuffers buffers) {
-    var camera = ctx.camera();
-    var pixels = buffers.colorBuffer();
-    var width = camera.width();
-    IntStream.range(0, camera.height()).parallel().forEach(y -> {
-      var rowOffset = y * width;
-      for (var x = 0; x < width; x++) {
-        pixels[rowOffset + x] = SkyRenderer.sampleSky(
-          ctx,
-          camera.sampleDirX(x, y),
-          camera.sampleDirY(x, y),
-          camera.sampleDirZ(x, y)
-        );
-      }
-    });
+    SkyRenderer.renderBackground(ctx, buffers);
+    rasterPass(ctx.camera(), ctx.animationTick(), SkyRenderer.collectSkyQuads(ctx), buffers, false, RasterPassKind.UNTRACKED);
     buffers.clearDepth();
   }
 
@@ -68,20 +60,15 @@ public final class RasterPipeline {
     long animationTick,
     RenderQuad[] quads,
     RasterBuffers buffers,
-    boolean sortBackToFront
+    boolean sortBackToFront,
+    RasterPassKind passKind
   ) {
     if (quads.length == 0) {
       return;
     }
 
     var triangles = projectQuads(camera, quads);
-    if (sortBackToFront) {
-      RenderDebugTrace.current().translucentTriangles(triangles.size());
-    } else if (quads[0].material().alphaMode() == RendererAssets.AlphaMode.CUTOUT) {
-      RenderDebugTrace.current().cutoutTriangles(triangles.size());
-    } else {
-      RenderDebugTrace.current().opaqueTriangles(triangles.size());
-    }
+    recordTriangleCount(passKind, triangles.size());
     if (triangles.isEmpty()) {
       return;
     }
@@ -519,6 +506,23 @@ public final class RasterPipeline {
     RIGHT,
     TOP,
     BOTTOM
+  }
+
+  private void recordTriangleCount(RasterPassKind passKind, int count) {
+    switch (passKind) {
+      case OPAQUE -> RenderDebugTrace.current().opaqueTriangles(count);
+      case CUTOUT -> RenderDebugTrace.current().cutoutTriangles(count);
+      case TRANSLUCENT -> RenderDebugTrace.current().translucentTriangles(count);
+      case UNTRACKED -> {
+      }
+    }
+  }
+
+  private enum RasterPassKind {
+    OPAQUE,
+    CUTOUT,
+    TRANSLUCENT,
+    UNTRACKED
   }
 
   private record ClipVertex(float x, float y, float z, float w, float u, float v, float a, float r, float g, float b) {}

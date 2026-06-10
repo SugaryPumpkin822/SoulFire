@@ -216,7 +216,11 @@ public class SceneCollector {
       billboardBuckets.put(bucketKey, count + 1);
     }
 
-    builder.add(billboard);
+    if (priority == 1) {
+      builder.addWeather(billboard);
+    } else {
+      builder.add(billboard);
+    }
     RenderDebugTrace.current().billboard();
   }
 

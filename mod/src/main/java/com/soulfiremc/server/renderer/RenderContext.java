@@ -18,6 +18,9 @@
 package com.soulfiremc.server.renderer;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.attribute.EnvironmentAttributeProbe;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,7 +28,9 @@ import java.util.concurrent.ConcurrentMap;
 
 public record RenderContext(
   ClientLevel level,
+  LocalPlayer localPlayer,
   Camera camera,
+  EnvironmentAttributeProbe environmentProbe,
   int maxDistance,
   double maxDistanceSq,
   int minY,
@@ -35,10 +40,14 @@ public record RenderContext(
   ConcurrentMap<Long, Float> localLightCache,
   SectionMeshCache sectionMeshCache
 ) {
-  public static RenderContext create(ClientLevel level, Camera camera, int maxDistance) {
+  public static RenderContext create(ClientLevel level, LocalPlayer localPlayer, Camera camera, int maxDistance) {
+    var environmentProbe = new EnvironmentAttributeProbe();
+    environmentProbe.tick(level, new Vec3(camera.eyeX(), camera.eyeY(), camera.eyeZ()));
     return new RenderContext(
       level,
+      localPlayer,
       camera,
+      environmentProbe,
       maxDistance,
       (double) maxDistance * maxDistance,
       level.getMinY(),

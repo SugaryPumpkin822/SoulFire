@@ -68,7 +68,7 @@ public class SoftwareRenderer {
     var renderStart = System.nanoTime();
     try {
       var camera = new Camera(eyePos, yRot, xRot, width, height, fov, maxDistance + 32.0F);
-      var ctx = RenderContext.create(level, camera, maxDistance);
+      var ctx = RenderContext.create(level, localPlayer, camera, maxDistance);
 
       var dynamicCollectNanos = 0L;
 
@@ -83,9 +83,13 @@ public class SoftwareRenderer {
       var dynamicCollectStart = System.nanoTime();
       var dynamicScene = SceneCollector.collectEntitiesAndWeather(ctx, localPlayer);
       dynamicCollectNanos += System.nanoTime() - dynamicCollectStart;
+
+      var cloudCollectStart = System.nanoTime();
+      var cloudScene = CloudMeshCollector.collect(ctx);
+      dynamicCollectNanos += System.nanoTime() - cloudCollectStart;
       debugTrace.dynamicCollectNanos(dynamicCollectNanos);
 
-      var sceneData = worldScene.merge(blockEntityScene).merge(dynamicScene);
+      var sceneData = worldScene.merge(blockEntityScene).merge(dynamicScene).merge(cloudScene);
       var buffers = new RasterBuffers(width, height);
 
       var rasterStart = System.nanoTime();

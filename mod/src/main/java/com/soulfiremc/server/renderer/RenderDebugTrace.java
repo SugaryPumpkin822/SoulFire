@@ -338,7 +338,7 @@ public final class RenderDebugTrace {
       return;
     }
     log.info(
-      "renderer-debug#{} size={}x{} dist={} yaw={} pitch={} scene[opaque={},cutout={},translucent={}] world[chunks={},loaded={},sections={},meshed={},cacheHit={},cacheMiss={}] quads[block={},fluidTop={},fluidBottom={},fluidSide={},billboard={},shadow={},weather={}] entities[seen={},visible={}] vanilla[blockHit={},blockFallback={},livingHit={},livingFallback={},playerHit={},playerFallback={},entityTextureFallback={}] raster[opaqueTris={},cutoutTris={},translucentTris={}] timeMs[world={},dynamic={},raster={},total={}]",
+      "renderer-debug#{} size={}x{} dist={} yaw={} pitch={} scene[opaque={},cutout={},translucent={},clouds={},weather={}] world[chunks={},loaded={},sections={},meshed={},cacheHit={},cacheMiss={}] quads[block={},fluidTop={},fluidBottom={},fluidSide={},billboard={},shadow={},weather={}] entities[seen={},visible={}] vanilla[blockHit={},blockFallback={},livingHit={},livingFallback={},playerHit={},playerFallback={},entityTextureFallback={}] raster[opaqueTris={},cutoutTris={},translucentTris={}] timeMs[world={},dynamic={},raster={},total={}]",
       renderId,
       width,
       height,
@@ -348,6 +348,8 @@ public final class RenderDebugTrace {
       sceneData.opaque().length,
       sceneData.cutout().length,
       sceneData.translucent().length,
+      sceneData.clouds().length,
+      sceneData.weather().length,
       chunksConsidered.sum(),
       chunksLoaded.sum(),
       sectionsVisible.sum(),

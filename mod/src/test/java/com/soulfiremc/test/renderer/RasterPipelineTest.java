@@ -262,6 +262,27 @@ class RasterPipelineTest {
   }
 
   @Test
+  void cloudPassRendersAfterGenericTranslucentGeometry() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    scene.add(quad(-1.0F, -1.0F, 4.0F, 1.0F, 1.0F, solidTexture(0xFFFF0000), RendererAssets.AlphaMode.TRANSLUCENT, 0x80FFFFFF));
+    scene.addCloud(customQuad(
+      vertex(-1.0F, -1.0F, 8.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 8.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 8.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 8.0F, 1.0F, 1.0F),
+      translucentMaterial(solidTexture(0xFF00FF00), false)
+    ));
+
+    pipeline.renderSynthetic(camera, scene.build(), buffers, 0L, 0xFF000000);
+
+    var color = buffers.image().getRGB(WIDTH / 2, HEIGHT / 2);
+    assertTrue(((color >> 8) & 0xFF) > ((color >> 16) & 0xFF));
+  }
+
+  @Test
   void equalDepthOpaqueFragmentsUseBlaze3dLequalDepthTest() {
     var pipeline = new RasterPipeline();
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
@@ -494,6 +515,22 @@ class RasterPipelineTest {
     image.setRGB(0, 0, leftArgb);
     image.setRGB(1, 0, rightArgb);
     return RendererAssets.TextureImage.from(image, null);
+  }
+
+  private static RenderMaterial translucentMaterial(RendererAssets.TextureImage texture, boolean depthWrite) {
+    return new RenderMaterial(
+      texture,
+      RendererAssets.AlphaMode.TRANSLUCENT,
+      0x80FFFFFF,
+      false,
+      0.0F,
+      0,
+      RenderMaterial.DepthTest.LESS_THAN_OR_EQUAL,
+      depthWrite,
+      RenderMaterial.BlendState.from(BlendFunction.TRANSLUCENT),
+      ColorTargetState.WRITE_ALL,
+      RenderMaterial.UvTransform.IDENTITY
+    );
   }
 
   private static void assertRedBlendedOverBlue(int color) {

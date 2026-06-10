@@ -21,8 +21,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 /// A full frame's worth of raster primitives split by render pass.
-public record SceneData(RenderQuad[] opaque, RenderQuad[] cutout, RenderQuad[] translucent) {
-  public static final SceneData EMPTY = new SceneData(new RenderQuad[0], new RenderQuad[0], new RenderQuad[0]);
+public record SceneData(RenderQuad[] opaque, RenderQuad[] cutout, RenderQuad[] translucent, RenderQuad[] clouds, RenderQuad[] weather) {
+  public static final SceneData EMPTY = new SceneData(new RenderQuad[0], new RenderQuad[0], new RenderQuad[0], new RenderQuad[0], new RenderQuad[0]);
 
   public static Builder builder() {
     return new Builder();
@@ -39,12 +39,14 @@ public record SceneData(RenderQuad[] opaque, RenderQuad[] cutout, RenderQuad[] t
     return new SceneData(
       concat(opaque, other.opaque),
       concat(cutout, other.cutout),
-      concat(translucent, other.translucent)
+      concat(translucent, other.translucent),
+      concat(clouds, other.clouds),
+      concat(weather, other.weather)
     );
   }
 
   public int totalQuadCount() {
-    return opaque.length + cutout.length + translucent.length;
+    return opaque.length + cutout.length + translucent.length + clouds.length + weather.length;
   }
 
   private static RenderQuad[] concat(RenderQuad[] left, RenderQuad[] right) {
@@ -57,6 +59,8 @@ public record SceneData(RenderQuad[] opaque, RenderQuad[] cutout, RenderQuad[] t
     private final ArrayList<RenderQuad> opaque = new ArrayList<>();
     private final ArrayList<RenderQuad> cutout = new ArrayList<>();
     private final ArrayList<RenderQuad> translucent = new ArrayList<>();
+    private final ArrayList<RenderQuad> clouds = new ArrayList<>();
+    private final ArrayList<RenderQuad> weather = new ArrayList<>();
 
     public void add(RenderQuad quad) {
       switch (quad.material().alphaMode()) {
@@ -70,17 +74,29 @@ public record SceneData(RenderQuad[] opaque, RenderQuad[] cutout, RenderQuad[] t
       opaque.addAll(Arrays.asList(sceneData.opaque()));
       cutout.addAll(Arrays.asList(sceneData.cutout()));
       translucent.addAll(Arrays.asList(sceneData.translucent()));
+      clouds.addAll(Arrays.asList(sceneData.clouds()));
+      weather.addAll(Arrays.asList(sceneData.weather()));
+    }
+
+    public void addCloud(RenderQuad quad) {
+      clouds.add(quad);
+    }
+
+    public void addWeather(RenderQuad quad) {
+      weather.add(quad);
     }
 
     public SceneData build() {
-      if (opaque.isEmpty() && cutout.isEmpty() && translucent.isEmpty()) {
+      if (opaque.isEmpty() && cutout.isEmpty() && translucent.isEmpty() && clouds.isEmpty() && weather.isEmpty()) {
         return EMPTY;
       }
 
       return new SceneData(
         opaque.toArray(RenderQuad[]::new),
         cutout.toArray(RenderQuad[]::new),
-        translucent.toArray(RenderQuad[]::new)
+        translucent.toArray(RenderQuad[]::new),
+        clouds.toArray(RenderQuad[]::new),
+        weather.toArray(RenderQuad[]::new)
       );
     }
   }
