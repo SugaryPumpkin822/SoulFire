@@ -232,8 +232,8 @@ public final class InventoryItemIconRenderer {
     for (var i = 0; i < 4; i++) {
       vertices[i] = transform.transformPosition(new Vector3f(bakedQuad.position(i)));
       var packedUv = bakedQuad.packedUV(i);
-      uv[i * 2] = normalizeSpriteU(sprite, Float.intBitsToFloat((int) packedUv));
-      uv[i * 2 + 1] = normalizeSpriteV(sprite, Float.intBitsToFloat((int) (packedUv >>> 32)));
+      uv[i * 2] = BakedQuadUv.localU(sprite, packedUv);
+      uv[i * 2 + 1] = BakedQuadUv.localV(sprite, packedUv);
     }
 
     var tintColor = 0xFFFFFFFF;
@@ -845,22 +845,6 @@ public final class InventoryItemIconRenderer {
 
   private static int normalizeTint(int tint) {
     return (tint & 0xFF000000) == 0 ? 0xFF000000 | tint : tint;
-  }
-
-  private static float normalizeSpriteU(TextureAtlasSprite sprite, float atlasU) {
-    var span = sprite.getU1() - sprite.getU0();
-    if (Math.abs(span) < 1.0E-6F) {
-      return 0.0F;
-    }
-    return Math.clamp((atlasU - sprite.getU0()) / span, 0.0F, 1.0F);
-  }
-
-  private static float normalizeSpriteV(TextureAtlasSprite sprite, float atlasV) {
-    var span = sprite.getV1() - sprite.getV0();
-    if (Math.abs(span) < 1.0E-6F) {
-      return 0.0F;
-    }
-    return Math.clamp((atlasV - sprite.getV0()) / span, 0.0F, 1.0F);
   }
 
   private static int applyGuiLighting(int color, Vector3f[] vertices, boolean shade, int emission) {

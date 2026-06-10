@@ -72,6 +72,10 @@ public class BillboardGeometry {
   }
 
   public static RenderQuad textQuad(PoseStack poseStack, float width, float height, float x, float y, RendererAssets.TextureImage texture) {
+    return textQuad(poseStack, width, height, x, y, texture, 0.0F);
+  }
+
+  public static RenderQuad textQuad(PoseStack poseStack, float width, float height, float x, float y, RendererAssets.TextureImage texture, float depthBias) {
     var vertices = new Vector3f[]{
       poseStack.last().pose().transformPosition(new Vector3f(x, y - height, 0.0F)),
       poseStack.last().pose().transformPosition(new Vector3f(x + width, y - height, 0.0F)),
@@ -88,6 +92,6 @@ public class BillboardGeometry {
       0,
       true
     );
-    return WorldMeshCollector.toRenderQuad(face, 0.0, 0.0, 0.0, 0xFFFFFFFF, true, 0.0F);
+    return WorldMeshCollector.toRenderQuad(face, 0.0, 0.0, 0.0, 0xFFFFFFFF, true, depthBias);
   }
 }

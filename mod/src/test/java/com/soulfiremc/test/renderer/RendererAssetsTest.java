@@ -22,6 +22,7 @@ import com.soulfiremc.test.utils.TestBootstrap;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Blocks;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +73,17 @@ class RendererAssetsTest {
   }
 
   @Test
+  void vanillaBlockGeometryPreservesSpriteLocalUvRange() {
+    var geometry = RendererAssets.instance().blockGeometry(Blocks.STONE.defaultBlockState());
+    Assumptions.assumeFalse(
+      geometry.faces().isEmpty(),
+      "Live vanilla model geometry required to verify baked quad UV extraction"
+    );
+
+    assertTrue(geometry.faces().stream().anyMatch(face -> uvRange(face.uv(), 0) > 0.9F && uvRange(face.uv(), 1) > 0.9F));
+  }
+
+  @Test
   void resolvesTextRenderAssets() {
     var assets = RendererAssets.instance();
     var textTexture = assets.textTexture(Component.literal("SoulFire"), 96, 0xFFFFFFFF, 0x66000000);
@@ -89,5 +101,16 @@ class RendererAssetsTest {
     var texture = RendererAssets.TextureImage.from(image, null);
     assertDoesNotThrow(() -> texture.sample(0.25F, 0.75F, 0L));
     assertEquals(0xFF000002, texture.sample(0.25F, 0.75F, 0L));
+  }
+
+  private float uvRange(float[] uv, int axis) {
+    var min = Float.POSITIVE_INFINITY;
+    var max = Float.NEGATIVE_INFINITY;
+    for (var i = axis; i < uv.length; i += 2) {
+      min = Math.min(min, uv[i]);
+      max = Math.max(max, uv[i]);
+    }
+
+    return max - min;
   }
 }

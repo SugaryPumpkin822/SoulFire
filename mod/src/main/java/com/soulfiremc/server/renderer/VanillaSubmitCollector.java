@@ -170,7 +170,10 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       return SceneData.EMPTY;
     }
 
-    dispatcher.submit(renderState, new PoseStack(), collector, collector.cameraRenderState());
+    var poseStack = new PoseStack();
+    var blockPos = blockEntity.getBlockPos();
+    poseStack.translate(blockPos.getX(), blockPos.getY(), blockPos.getZ());
+    dispatcher.submit(renderState, poseStack, collector, collector.cameraRenderState());
     return collector.builder.build();
   }
 
@@ -292,7 +295,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     int backgroundColor,
     int outlineColor
   ) {
-    addSequenceQuad(poseStack, text, x, y, color, backgroundColor);
+    addSequenceQuad(poseStack, text, x, y, color, backgroundColor, textDepthBias(displayMode));
   }
 
   @Override
@@ -551,8 +554,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       Vector3fc position = quad.position(i);
       vertices[i] = poseMatrix.transformPosition(new Vector3f(position));
       var packedUv = quad.packedUV(i);
-      uv[i * 2] = normalizeSpriteU(sprite, Float.intBitsToFloat((int) packedUv));
-      uv[i * 2 + 1] = normalizeSpriteV(sprite, Float.intBitsToFloat((int) (packedUv >>> 32)));
+      uv[i * 2] = BakedQuadUv.localU(sprite, packedUv);
+      uv[i * 2 + 1] = BakedQuadUv.localV(sprite, packedUv);
     }
 
     var color = baseColor;
@@ -601,7 +604,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     addTexturedQuad(poseStack, texture.width(), texture.height(), x, y, texture);
   }
 
-  private void addSequenceQuad(PoseStack poseStack, FormattedCharSequence text, float x, float y, int color, int backgroundColor) {
+  private void addSequenceQuad(PoseStack poseStack, FormattedCharSequence text, float x, float y, int color, int backgroundColor, float depthBias) {
     var plain = plainText(text);
     if (plain.isEmpty()) {
       return;
@@ -609,11 +612,19 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
 
     var width = Math.max(16, font.width(text) + 4);
     var texture = assets.textTexture(Component.literal(plain), width, color, backgroundColor);
-    addTexturedQuad(poseStack, texture.width(), texture.height(), x, y, texture);
+    addTexturedQuad(poseStack, texture.width(), texture.height(), x, y, texture, depthBias);
   }
 
   private void addTexturedQuad(PoseStack poseStack, float width, float height, float x, float y, RendererAssets.TextureImage texture) {
-    builder.add(BillboardGeometry.textQuad(poseStack, width, height, x, y, texture));
+    addTexturedQuad(poseStack, width, height, x, y, texture, 0.0F);
+  }
+
+  private void addTexturedQuad(PoseStack poseStack, float width, float height, float x, float y, RendererAssets.TextureImage texture, float depthBias) {
+    builder.add(BillboardGeometry.textQuad(poseStack, width, height, x, y, texture, depthBias));
+  }
+
+  private float textDepthBias(Font.DisplayMode displayMode) {
+    return displayMode == Font.DisplayMode.POLYGON_OFFSET ? -1.0F : 0.0F;
   }
 
   private void addFace(
@@ -686,26 +697,6 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     } catch (NumberFormatException _) {
       return RenderMaterial.defaultAlphaCutoutThreshold(alphaMode);
     }
-  }
-
-  private float normalizeSpriteU(TextureAtlasSprite sprite, float atlasU) {
-    var span = sprite.getU1() - sprite.getU0();
-    if (Math.abs(span) < 1.0E-6F) {
-      return 0.0F;
-    }
-    return clamp01((atlasU - sprite.getU0()) / span);
-  }
-
-  private float normalizeSpriteV(TextureAtlasSprite sprite, float atlasV) {
-    var span = sprite.getV1() - sprite.getV0();
-    if (Math.abs(span) < 1.0E-6F) {
-      return 0.0F;
-    }
-    return clamp01((atlasV - sprite.getV0()) / span);
-  }
-
-  private float clamp01(float value) {
-    return Math.clamp(value, 0.0F, 1.0F);
   }
 
   private int modulateColor(int left, int right) {
