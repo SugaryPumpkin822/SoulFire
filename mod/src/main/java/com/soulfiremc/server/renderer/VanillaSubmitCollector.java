@@ -31,7 +31,6 @@ import net.minecraft.client.model.Model;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.Lightmap;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.OrderedSubmitNodeCollector;
 import net.minecraft.client.renderer.Sheets;
@@ -715,7 +714,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     var minecraft = Minecraft.getInstance();
     var blockState = movingBlockRenderState.blockState;
     var model = minecraft.getModelManager().getBlockStateModelSet().get(blockState);
-    var optionsState = minecraft.gameRenderer.getGameRenderState().optionsRenderState;
+    var ambientOcclusion = minecraft.options.ambientOcclusion().get();
+    var cutoutLeaves = minecraft.options.cutoutLeaves().get();
     var stage = model.hasMaterialFlag(1) ? FeatureStage.TRANSLUCENT_BLOCK : FeatureStage.SOLID_BLOCK;
     withStage(stage, () -> {
       var basePose = poseStack.last().copy();
@@ -726,8 +726,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         putMovingBlockQuad(basePose, consumers, x, y, z, quad, instance, layer);
       };
       BlockQuadOutput solidOutput = (x, y, z, quad, instance) -> putMovingBlockQuad(basePose, consumers, x, y, z, quad, instance, ChunkSectionLayer.SOLID);
-      var blockOutput = ModelBlockRenderer.forceOpaque(optionsState.cutoutLeaves, blockState) ? solidOutput : output;
-      var blockRenderer = new ModelBlockRenderer(optionsState.ambientOcclusion, false, minecraft.getBlockColors());
+      var blockOutput = ModelBlockRenderer.forceOpaque(cutoutLeaves, blockState) ? solidOutput : output;
+      var blockRenderer = new ModelBlockRenderer(ambientOcclusion, false, minecraft.getBlockColors());
       var seed = blockState.getSeed(movingBlockRenderState.randomSeedPos);
       blockRenderer.tesselateBlock(
         blockOutput,
@@ -1336,7 +1336,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   }
 
   private int nameTagBackgroundColor() {
-    var opacity = Minecraft.getInstance().gameRenderer.getGameRenderState().optionsRenderState.getBackgroundOpacity(0.25F);
+    var opacity = Minecraft.getInstance().options.getBackgroundOpacity(0.25F);
     return Math.clamp((int) (opacity * 255.0F), 0, 255) << 24;
   }
 
@@ -1534,17 +1534,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       return 0xFFFFFFFF;
     }
 
-    var litCoords = LightCoordsUtil.lightCoordsWithEmission(lightCoords, Math.clamp(emission, 0, 15));
-    if (litCoords == LightCoordsUtil.FULL_BRIGHT) {
-      return 0xFFFFFFFF;
-    }
-
-    var blockLight = LightCoordsUtil.block(litCoords) / 15.0F;
-    var skyLevel = LightCoordsUtil.sky(litCoords);
-    var skyLight = ctx.level() != null ? Lightmap.getBrightness(ctx.level().dimensionType(), skyLevel) : skyLevel / 15.0F;
-    var factor = Math.clamp(Math.max(blockLight, skyLight), 0.18F, 1.0F);
-    var channel = Math.clamp(Math.round(factor * 255.0F), 0, 255);
-    return 0xFF000000 | (channel << 16) | (channel << 8) | channel;
+    return VanillaLightmap.color(ctx, lightCoords, emission);
   }
 
   private int directionalLightColor(int color, Vector3f normal, @Nullable RenderType renderType, FaceLighting faceLighting) {

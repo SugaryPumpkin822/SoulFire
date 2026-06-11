@@ -984,7 +984,7 @@ class VanillaSubmitCollectorTextTest {
       256,
       0L,
       ConcurrentHashMap.newKeySet(),
-      new ConcurrentHashMap<>(),
+      null,
       null
     ));
   }

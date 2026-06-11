@@ -35,7 +35,6 @@
     "headless.debloat.MixinRealmsClient",
     "headless.debloat.MixinRealmsPersistence",
     "headless.debloat.MixinWorldSessionTelemetryManager",
-    "headless.rendering.MixinClientChunkCache",
     "headless.rendering.MixinClientLevel",
     "headless.rendering.MixinCommandEncoder",
     "headless.rendering.MixinEntityRenderDispatcher",

@@ -94,7 +94,7 @@ class SceneCollectorTest {
       256,
       0L,
       ConcurrentHashMap.newKeySet(),
-      new ConcurrentHashMap<>(),
+      null,
       null
     );
     var renderState = new WeatherRenderState();

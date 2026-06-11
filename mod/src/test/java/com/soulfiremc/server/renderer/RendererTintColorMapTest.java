@@ -18,6 +18,7 @@
 package com.soulfiremc.server.renderer;
 
 import com.soulfiremc.test.utils.TestBootstrap;
+import net.minecraft.util.ARGB;
 import net.minecraft.world.level.DryFoliageColor;
 import net.minecraft.world.level.FoliageColor;
 import net.minecraft.world.level.GrassColor;
@@ -46,8 +47,8 @@ class RendererTintColorMapTest {
     assertTrue(RendererAssets.instance().ensureVanillaColorMapsLoaded());
 
     var leafTextureSample = 0xFFB9BCB9;
-    var tinted = LightingCalculator.tint(leafTextureSample, FoliageColor.get(0.5, 0.5));
-    var lit = LightingCalculator.brighten(tinted, 0.8F);
+    var tinted = ARGB.multiply(leafTextureSample, ARGB.opaque(FoliageColor.get(0.5, 0.5)));
+    var lit = ARGB.scaleRGB(tinted, 0.8F);
 
     assertNotEquals(0xFF000000, lit);
     assertTrue(green(lit) > red(lit));

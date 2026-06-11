@@ -21,7 +21,6 @@ import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.Lightmap;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.WeatherEffectRenderer;
 import net.minecraft.client.renderer.state.level.WeatherRenderState;
@@ -319,16 +318,7 @@ public class SceneCollector {
   }
 
   private static int lightColor(RenderContext ctx, int lightCoords) {
-    if (lightCoords == LightCoordsUtil.FULL_BRIGHT) {
-      return 0xFFFFFFFF;
-    }
-
-    var blockLight = LightCoordsUtil.block(lightCoords) / 15.0F;
-    var skyLevel = LightCoordsUtil.sky(lightCoords);
-    var skyLight = Lightmap.getBrightness(ctx.level().dimensionType(), skyLevel);
-    var factor = Math.clamp(Math.max(blockLight, skyLight), 0.18F, 1.0F);
-    var channel = Math.clamp(Math.round(factor * 255.0F), 0, 255);
-    return 0xFF000000 | (channel << 16) | (channel << 8) | channel;
+    return VanillaLightmap.color(ctx, lightCoords, 0);
   }
 
   private static int modulateColor(int left, int right) {

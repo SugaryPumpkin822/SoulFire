@@ -17,15 +17,22 @@
  */
 package com.soulfiremc.server.renderer;
 
+import com.mojang.blaze3d.vertex.QuadInstance;
 import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.block.BlockModelLighter;
+import net.minecraft.client.renderer.block.BlockQuadOutput;
+import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.FluidRenderer;
+import net.minecraft.client.renderer.block.ModelBlockRenderer;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -95,46 +102,55 @@ public class WorldMeshCollector {
     var trace = RenderDebugTrace.current();
     trace.sectionMeshed();
     var builder = SceneData.builder();
-    var level = ctx.level();
     var assets = RendererAssets.instance();
-    var fluidRenderer = new FluidRenderer(Minecraft.getInstance().getModelManager().getFluidStateModelSet());
+    var minecraft = Minecraft.getInstance();
+    assets.ensureVanillaColorMapsLoaded();
+    var modelSet = minecraft.getModelManager().getBlockStateModelSet();
+    var ambientOcclusion = minecraft.options.ambientOcclusion().get();
+    var cutoutLeaves = minecraft.options.cutoutLeaves().get();
+    var blockRenderer = new ModelBlockRenderer(ambientOcclusion, true, minecraft.getBlockColors());
+    var fluidRenderer = new FluidRenderer(minecraft.getModelManager().getFluidStateModelSet());
     var originX = chunk.getPos().getMinBlockX();
     var originY = SectionPos.sectionToBlockCoord(sectionY);
     var originZ = chunk.getPos().getMinBlockZ();
     var blockPos = new BlockPos.MutableBlockPos();
 
-    for (var localY = 0; localY < 16; localY++) {
-      for (var localZ = 0; localZ < 16; localZ++) {
-        for (var localX = 0; localX < 16; localX++) {
-          blockPos.set(originX + localX, originY + localY, originZ + localZ);
-          var blockState = section.getBlockState(localX, localY, localZ);
-          var fluidState = blockState.getFluidState();
-          var pureFluidBlock = !fluidState.isEmpty() && blockState.getBlock() == fluidState.createLegacyBlock().getBlock();
-          if (!pureFluidBlock && !blockState.isAir() && blockState.getBlock() != Blocks.VOID_AIR && !shouldSkipStaticBlockGeometry(ctx, blockPos)) {
-            for (var face : assets.blockGeometry(blockState).faces()) {
-              if (!shouldEmitBlockFace(level, blockState, blockPos, face)) {
-                continue;
-              }
-              builder.addTerrain(
-                toTerrainRenderQuad(
-                  face,
-                  originX + localX,
-                  originY + localY,
-                  originZ + localZ,
-                  LightingCalculator.faceColor(ctx, face, blockState, blockPos),
-                  false,
-                  0.0F
-                )
-              );
-              trace.blockQuads(1L);
+    BlockModelLighter.enableCaching();
+    try {
+      for (var localY = 0; localY < 16; localY++) {
+        for (var localZ = 0; localZ < 16; localZ++) {
+          for (var localX = 0; localX < 16; localX++) {
+            blockPos.set(originX + localX, originY + localY, originZ + localZ);
+            var blockState = section.getBlockState(localX, localY, localZ);
+            if (blockState.isAir() || blockState.getBlock() == Blocks.VOID_AIR) {
+              continue;
             }
-          }
 
-          if (!fluidState.isEmpty()) {
-            builder.addTerrainAll(VanillaSubmitCollector.collectFluid(ctx, fluidRenderer, blockPos.immutable(), blockState, fluidState));
+            var fluidState = blockState.getFluidState();
+            if (!fluidState.isEmpty()) {
+              builder.addTerrainAll(VanillaSubmitCollector.collectFluid(ctx, fluidRenderer, blockPos.immutable(), blockState, fluidState));
+            }
+
+            if (blockState.getRenderShape() == RenderShape.MODEL && !shouldSkipStaticBlockGeometry(ctx, blockPos)) {
+              emitBlockModel(
+                ctx,
+                builder,
+                blockRenderer,
+                modelSet,
+                blockState,
+                blockPos,
+                originX + localX,
+                originY + localY,
+                originZ + localZ,
+                cutoutLeaves,
+                trace
+              );
+            }
           }
         }
       }
+    } finally {
+      BlockModelLighter.clearCache();
     }
 
     return builder.build();
@@ -144,19 +160,73 @@ public class WorldMeshCollector {
     return ctx.vanillaRenderedBlockEntities().contains(blockPos.asLong());
   }
 
-  private static boolean shouldEmitBlockFace(
-    BlockGetter level,
+  private static void emitBlockModel(
+    RenderContext ctx,
+    SceneData.Builder builder,
+    ModelBlockRenderer blockRenderer,
+    BlockStateModelSet modelSet,
     BlockState blockState,
     BlockPos blockPos,
-    RendererAssets.GeometryFace face
+    int x,
+    int y,
+    int z,
+    boolean cutoutLeaves,
+    RenderDebugTrace trace
   ) {
-    var direction = face.cullDirection();
-    if (direction == null) {
-      return true;
+    BlockQuadOutput output = (quadX, quadY, quadZ, quad, instance) -> {
+      var materialInfo = quad.materialInfo();
+      var layer = materialInfo != null ? materialInfo.layer() : ChunkSectionLayer.SOLID;
+      putTerrainBlockQuad(ctx, builder, quadX, quadY, quadZ, quad, instance, layer, trace);
+    };
+    BlockQuadOutput solidOutput = (quadX, quadY, quadZ, quad, instance) ->
+      putTerrainBlockQuad(ctx, builder, quadX, quadY, quadZ, quad, instance, ChunkSectionLayer.SOLID, trace);
+    var blockOutput = ModelBlockRenderer.forceOpaque(cutoutLeaves, blockState) ? solidOutput : output;
+    blockRenderer.tesselateBlock(blockOutput, x, y, z, ctx.level(), blockPos, blockState, modelSet.get(blockState), blockState.getSeed(blockPos));
+  }
+
+  private static void putTerrainBlockQuad(
+    RenderContext ctx,
+    SceneData.Builder builder,
+    float x,
+    float y,
+    float z,
+    BakedQuad quad,
+    QuadInstance instance,
+    ChunkSectionLayer layer,
+    RenderDebugTrace trace
+  ) {
+    if (quad == null || quad.materialInfo() == null || quad.materialInfo().sprite() == null || quad.materialInfo().sprite().contents() == null) {
+      return;
     }
 
-    var neighborState = level.getBlockState(blockPos.relative(direction));
-    return Block.shouldRenderFace(blockState, neighborState, direction);
+    var materialInfo = quad.materialInfo();
+    var sprite = materialInfo.sprite();
+    var texture = RendererAssets.instance().texture(sprite.contents().name());
+    var alphaMode = RendererAssets.alphaModeForVanillaLayer(layer);
+    var material = RenderMaterial
+      .create(texture, alphaMode, 0xFFFFFFFF, false, 0.0F, RenderMaterial.defaultAlphaCutoutThreshold(alphaMode))
+      .withPipelineState(layer.pipeline());
+    var vertices = new RenderVertex[4];
+    for (var i = 0; i < 4; i++) {
+      var position = quad.position(i);
+      if (position == null) {
+        return;
+      }
+
+      var packedUv = quad.packedUV(i);
+      var color = ARGB.multiply(instance.getColor(i), VanillaLightmap.color(ctx, instance.getLightCoords(i), materialInfo.lightEmission()));
+      vertices[i] = new RenderVertex(
+        position.x() + x,
+        position.y() + y,
+        position.z() + z,
+        BakedQuadUv.localU(sprite, packedUv),
+        BakedQuadUv.localV(sprite, packedUv),
+        color
+      );
+    }
+
+    builder.addTerrain(new RenderQuad(vertices[0], vertices[1], vertices[2], vertices[3], material));
+    trace.blockQuads(1L);
   }
 
   static RenderQuad toRenderQuad(
