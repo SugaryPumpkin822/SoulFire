@@ -155,9 +155,10 @@ public record RenderMaterial(
 
   public RenderMaterial withRenderType(RenderType renderType, int sortGroup) {
     var pipeline = renderType.pipeline();
+    var fragmentShader = pipeline.getFragmentShader().getPath();
     var colorTargetState = pipeline.getColorTargetState();
     return new RenderMaterial(
-      texture,
+      textureWithShaderAddressMode(texture, fragmentShader),
       alphaMode,
       color,
       doubleSided || !pipeline.isCull(),
@@ -172,7 +173,7 @@ public record RenderMaterial(
       colorTargetState.writeMask(),
       UvTransform.fromMatrix(renderType.state.textureTransform.getMatrix()),
       textureSampleMode(renderType),
-      usesWorldFog(pipeline.getFragmentShader().getPath()),
+      usesWorldFog(fragmentShader),
       renderType.sortOnUpload() && renderType.mode() == VertexFormat.Mode.QUADS,
       sortGroup,
       viewScale(renderType),
@@ -181,9 +182,10 @@ public record RenderMaterial(
   }
 
   public RenderMaterial withPipelineState(RenderPipeline pipeline) {
+    var fragmentShader = pipeline.getFragmentShader().getPath();
     var colorTargetState = pipeline.getColorTargetState();
     return new RenderMaterial(
-      texture,
+      textureWithShaderAddressMode(texture, fragmentShader),
       alphaMode,
       color,
       doubleSided || !pipeline.isCull(),
@@ -197,8 +199,8 @@ public record RenderMaterial(
       BlendState.from(colorTargetState.blendFunction().orElse(null)),
       colorTargetState.writeMask(),
       uvTransform,
-      textureSampleMode,
-      usesWorldFog(pipeline.getFragmentShader().getPath()),
+      textureSampleMode(fragmentShader),
+      usesWorldFog(fragmentShader),
       sortOnUpload,
       sortGroup,
       viewScale,
@@ -273,10 +275,20 @@ public record RenderMaterial(
   }
 
   private static TextureSampleMode textureSampleMode(RenderType renderType) {
-    var fragmentShader = renderType.pipeline().getFragmentShader().getPath();
+    return textureSampleMode(renderType.pipeline().getFragmentShader().getPath());
+  }
+
+  private static TextureSampleMode textureSampleMode(String fragmentShader) {
     return switch (fragmentShader) {
       case "core/rendertype_text_intensity", "core/rendertype_text_intensity_see_through" -> TextureSampleMode.INTENSITY;
       default -> TextureSampleMode.COLOR;
+    };
+  }
+
+  private static RendererAssets.TextureImage textureWithShaderAddressMode(RendererAssets.TextureImage texture, String fragmentShader) {
+    return switch (fragmentShader) {
+      case "core/rendertype_entity_shadow" -> texture.withAddressMode(RendererAssets.TextureAddressMode.CLAMP_TO_EDGE);
+      default -> texture;
     };
   }
 

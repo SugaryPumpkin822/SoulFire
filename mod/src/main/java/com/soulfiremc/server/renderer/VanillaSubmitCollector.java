@@ -74,6 +74,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
@@ -106,6 +107,8 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   private static final float LINE_SHADER_VIEW_SCALE = 1.0F - 1.0F / 256.0F;
   private static final Vector3f LEVEL_LIGHT_0 = new Vector3f(0.2F, 1.0F, -0.7F).normalize();
   private static final Vector3f LEVEL_LIGHT_1 = new Vector3f(-0.2F, 1.0F, 0.7F).normalize();
+  private static final Vector3f NETHER_LEVEL_LIGHT_0 = new Vector3f(0.2F, 1.0F, -0.7F).normalize();
+  private static final Vector3f NETHER_LEVEL_LIGHT_1 = new Vector3f(-0.2F, -1.0F, 0.7F).normalize();
   private static final Direction[] DIRECTIONS = Direction.values();
   private static final RendererAssets.TextureImage WHITE_TEXTURE = createSolidTexture(0xFFFFFFFF);
   private final RenderContext ctx;
@@ -1348,13 +1351,25 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     if (faceLighting == FaceLighting.BACK) {
       unitNormal.negate();
     }
-    var light0 = Math.max(0.0F, LEVEL_LIGHT_0.dot(unitNormal));
-    var light1 = Math.max(0.0F, LEVEL_LIGHT_1.dot(unitNormal));
+    var light0 = Math.max(0.0F, levelLight0().dot(unitNormal));
+    var light1 = Math.max(0.0F, levelLight1().dot(unitNormal));
     var light = Math.min(1.0F, (light0 + light1) * 0.6F + 0.4F);
     var r = Math.clamp(Math.round(((color >>> 16) & 0xFF) * light), 0, 255);
     var g = Math.clamp(Math.round(((color >>> 8) & 0xFF) * light), 0, 255);
     var b = Math.clamp(Math.round((color & 0xFF) * light), 0, 255);
     return (color & 0xFF000000) | (r << 16) | (g << 8) | b;
+  }
+
+  private Vector3f levelLight0() {
+    return cardinalLightType() == CardinalLighting.Type.NETHER ? NETHER_LEVEL_LIGHT_0 : LEVEL_LIGHT_0;
+  }
+
+  private Vector3f levelLight1() {
+    return cardinalLightType() == CardinalLighting.Type.NETHER ? NETHER_LEVEL_LIGHT_1 : LEVEL_LIGHT_1;
+  }
+
+  private CardinalLighting.Type cardinalLightType() {
+    return ctx.level() != null ? ctx.level().dimensionType().cardinalLightType() : CardinalLighting.Type.DEFAULT;
   }
 
   private boolean usesDirectionalLighting(@Nullable RenderType renderType) {

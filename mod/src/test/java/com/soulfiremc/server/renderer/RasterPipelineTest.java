@@ -24,6 +24,7 @@ import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.platform.DestFactor;
 import com.mojang.blaze3d.platform.SourceFactor;
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
@@ -791,6 +792,46 @@ class RasterPipelineTest {
       .withRenderType(RenderTypes.entityShadow(Identifier.withDefaultNamespace("textures/misc/shadow.png")));
 
     assertEquals(0, material.alphaCutoutThreshold());
+  }
+
+  @Test
+  void entityShadowRenderTypeClampsTextureCoordinatesBeforeSampling() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    var material = RenderMaterial
+      .create(splitTexture(0xFFFF0000, 0xFF00FF00), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, true, 0.0F)
+      .withRenderType(RenderTypes.entityShadow(Identifier.withDefaultNamespace("textures/misc/shadow.png")));
+    scene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 1.25F, 0.5F),
+      vertex(-1.0F, 1.0F, 4.0F, 1.25F, 0.5F),
+      vertex(1.0F, 1.0F, 4.0F, 1.25F, 0.5F),
+      vertex(1.0F, -1.0F, 4.0F, 1.25F, 0.5F),
+      material
+    ));
+
+    renderSynthetic(pipeline, camera, scene.build(), buffers, 0L, 0xFF000000);
+
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF00FF00, 3);
+  }
+
+  @Test
+  void pipelineStateDerivesShaderTextureSamplingMode() {
+    var material = RenderMaterial
+      .create(solidTexture(0xFF40FF00), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, true, 0.0F)
+      .withPipelineState(RenderPipelines.TEXT_INTENSITY);
+
+    assertEquals(RenderMaterial.TextureSampleMode.INTENSITY, material.textureSampleMode());
+  }
+
+  @Test
+  void pipelineStateDerivesShaderTextureAddressMode() {
+    var material = RenderMaterial
+      .create(splitTexture(0xFFFF0000, 0xFF00FF00), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, true, 0.0F)
+      .withPipelineState(RenderPipelines.ENTITY_SHADOW);
+
+    assertEquals(RendererAssets.TextureAddressMode.CLAMP_TO_EDGE, material.texture().addressMode());
   }
 
   @Test
