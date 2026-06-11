@@ -20,6 +20,11 @@ package com.soulfiremc.server.renderer;
 import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.platform.DestFactor;
 import com.mojang.blaze3d.platform.SourceFactor;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.Mth;
+import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.world.level.LightLayer;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
@@ -34,22 +39,26 @@ public final class RasterPipeline {
 
   public void render(RenderContext ctx, SceneData sceneData, RasterBuffers buffers) {
     renderSky(ctx, buffers);
-    renderScene(ctx.camera(), sceneData, buffers, ctx.animationTick());
+    renderScene(ctx.camera(), sceneData, buffers, ctx.animationTick(), FogState.from(ctx));
   }
 
   public void renderScene(Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick) {
-    rasterPass(camera, animationTick, sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE);
-    rasterPass(camera, animationTick, sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT);
-    rasterPass(camera, animationTick, sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT);
-    rasterPass(camera, animationTick, sceneData.terrainTranslucent(), buffers, true, RasterPassKind.TRANSLUCENT);
-    rasterPass(camera, animationTick, sceneData.translucentParticles(), buffers, true, RasterPassKind.TRANSLUCENT);
-    rasterPass(camera, animationTick, sceneData.clouds(), buffers, false, RasterPassKind.TRANSLUCENT);
-    rasterPass(camera, animationTick, sceneData.weather(), buffers, false, RasterPassKind.TRANSLUCENT);
+    renderScene(camera, sceneData, buffers, animationTick, FogState.DISABLED);
+  }
+
+  void renderScene(Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick, FogState fogState) {
+    rasterPass(camera, animationTick, sceneData.opaque(), buffers, false, RasterPassKind.OPAQUE, fogState);
+    rasterPass(camera, animationTick, sceneData.cutout(), buffers, false, RasterPassKind.CUTOUT, fogState);
+    rasterPass(camera, animationTick, sceneData.translucent(), buffers, true, RasterPassKind.TRANSLUCENT, fogState);
+    rasterPass(camera, animationTick, sceneData.terrainTranslucent(), buffers, true, RasterPassKind.TRANSLUCENT, fogState);
+    rasterPass(camera, animationTick, sceneData.translucentParticles(), buffers, true, RasterPassKind.TRANSLUCENT, fogState);
+    rasterPass(camera, animationTick, sceneData.clouds(), buffers, false, RasterPassKind.TRANSLUCENT, FogState.DISABLED);
+    rasterPass(camera, animationTick, sceneData.weather(), buffers, false, RasterPassKind.TRANSLUCENT, fogState);
   }
 
   private void renderSky(RenderContext ctx, RasterBuffers buffers) {
     SkyRenderer.renderBackground(ctx, buffers);
-    rasterPass(ctx.camera(), ctx.animationTick(), SkyRenderer.collectSkyQuads(ctx), buffers, false, RasterPassKind.UNTRACKED);
+    rasterPass(ctx.camera(), ctx.animationTick(), SkyRenderer.collectSkyQuads(ctx), buffers, false, RasterPassKind.UNTRACKED, FogState.DISABLED);
     buffers.clearDepth();
   }
 
@@ -59,7 +68,8 @@ public final class RasterPipeline {
     RenderQuad[] quads,
     RasterBuffers buffers,
     boolean sortBackToFront,
-    RasterPassKind passKind
+    RasterPassKind passKind,
+    FogState fogState
   ) {
     if (quads.length == 0) {
       return;
@@ -112,7 +122,7 @@ public final class RasterPipeline {
       var maxX = Math.min(width - 1, minX + TILE_SIZE - 1);
       var maxY = Math.min(height - 1, minY + TILE_SIZE - 1);
       for (var triangle : bins[tileIndex]) {
-        rasterizeTriangle(camera, animationTick, triangle, buffers, minX, minY, maxX, maxY);
+        rasterizeTriangle(camera, animationTick, triangle, buffers, minX, minY, maxX, maxY, fogState);
       }
     });
   }
@@ -238,6 +248,8 @@ public final class RasterPipeline {
       current.y() + (next.y() - current.y()) * t,
       current.z() + (next.z() - current.z()) * t,
       current.w() + (next.w() - current.w()) * t,
+      current.sphericalFogDistance() + (next.sphericalFogDistance() - current.sphericalFogDistance()) * t,
+      current.cylindricalFogDistance() + (next.cylindricalFogDistance() - current.cylindricalFogDistance()) * t,
       current.u() + (next.u() - current.u()) * t,
       current.v() + (next.v() - current.v()) * t,
       current.a() + (next.a() - current.a()) * t,
@@ -252,10 +264,15 @@ public final class RasterPipeline {
   }
 
   private ClipVertex toClipVertex(Camera camera, Matrix4f viewRotation, Matrix4f projection, float viewScale, RenderVertex vertex) {
+    var relativeX = (float) (vertex.x() - camera.eyeX());
+    var relativeY = (float) (vertex.y() - camera.eyeY());
+    var relativeZ = (float) (vertex.z() - camera.eyeZ());
+    var sphericalFogDistance = (float) Math.sqrt(relativeX * relativeX + relativeY * relativeY + relativeZ * relativeZ);
+    var cylindricalFogDistance = Math.max((float) Math.sqrt(relativeX * relativeX + relativeZ * relativeZ), Math.abs(relativeY));
     var view = viewRotation.transform(new Vector4f(
-      (float) (vertex.x() - camera.eyeX()),
-      (float) (vertex.y() - camera.eyeY()),
-      (float) (vertex.z() - camera.eyeZ()),
+      relativeX,
+      relativeY,
+      relativeZ,
       1.0F
     ));
     if (viewScale != 1.0F) {
@@ -269,6 +286,8 @@ public final class RasterPipeline {
       clip.y,
       clip.z,
       clip.w,
+      sphericalFogDistance,
+      cylindricalFogDistance,
       vertex.u(),
       vertex.v(),
       (color >>> 24) & 0xFF,
@@ -297,6 +316,8 @@ public final class RasterPipeline {
       inverseW,
       vertex.u() * inverseW,
       vertex.v() * inverseW,
+      vertex.sphericalFogDistance() * inverseW,
+      vertex.cylindricalFogDistance() * inverseW,
       vertex.a() * inverseW,
       vertex.r() * inverseW,
       vertex.g() * inverseW,
@@ -313,6 +334,8 @@ public final class RasterPipeline {
       && Float.isFinite(vertex.y())
       && Float.isFinite(vertex.z())
       && Float.isFinite(vertex.w())
+      && Float.isFinite(vertex.sphericalFogDistance())
+      && Float.isFinite(vertex.cylindricalFogDistance())
       && Float.isFinite(vertex.u())
       && Float.isFinite(vertex.v())
       && Float.isFinite(vertex.a())
@@ -332,6 +355,8 @@ public final class RasterPipeline {
       && Float.isFinite(vertex.inverseW())
       && Float.isFinite(vertex.uOverW())
       && Float.isFinite(vertex.vOverW())
+      && Float.isFinite(vertex.sphericalFogDistanceOverW())
+      && Float.isFinite(vertex.cylindricalFogDistanceOverW())
       && Float.isFinite(vertex.aOverW())
       && Float.isFinite(vertex.rOverW())
       && Float.isFinite(vertex.gOverW())
@@ -357,7 +382,8 @@ public final class RasterPipeline {
     int clipMinX,
     int clipMinY,
     int clipMaxX,
-    int clipMaxY
+    int clipMaxY,
+    FogState fogState
   ) {
     var v0 = triangle.v0();
     var v1 = triangle.v1();
@@ -452,6 +478,15 @@ public final class RasterPipeline {
           continue;
         }
 
+        if (material.fog()) {
+          color = applyFog(
+            color,
+            interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, true),
+            interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, false),
+            fogState
+          );
+        }
+
         if (material.alphaMode() != RendererAssets.AlphaMode.TRANSLUCENT && !material.blendState().blends()) {
           if (material.depthWrite()) {
             depthBuffer[rasterIndex] = depth;
@@ -510,6 +545,22 @@ public final class RasterPipeline {
     return (a << 24) | (r << 16) | (g << 8) | b;
   }
 
+  private float interpolatedFogDistance(
+    float weight0,
+    float weight1,
+    float weight2,
+    float inverseW,
+    ProjectedVertex v0,
+    ProjectedVertex v1,
+    ProjectedVertex v2,
+    boolean spherical
+  ) {
+    if (spherical) {
+      return (weight0 * v0.sphericalFogDistanceOverW() + weight1 * v1.sphericalFogDistanceOverW() + weight2 * v2.sphericalFogDistanceOverW()) / inverseW;
+    }
+    return (weight0 * v0.cylindricalFogDistanceOverW() + weight1 * v1.cylindricalFogDistanceOverW() + weight2 * v2.cylindricalFogDistanceOverW()) / inverseW;
+  }
+
   private int colorChannel(float value) {
     return Math.clamp(Math.round(value), 0, 255);
   }
@@ -542,6 +593,36 @@ public final class RasterPipeline {
     var g = colorChannel(((overlayColor >> 8) & 0xFF) * overlayWeight + ((color >> 8) & 0xFF) * baseWeight);
     var b = colorChannel((overlayColor & 0xFF) * overlayWeight + (color & 0xFF) * baseWeight);
     return (color & 0xFF000000) | (r << 16) | (g << 8) | b;
+  }
+
+  private int applyFog(int color, float sphericalFogDistance, float cylindricalFogDistance, FogState fogState) {
+    if (!fogState.enabled()) {
+      return color;
+    }
+
+    var fogAmount = Math.max(
+      linearFogValue(sphericalFogDistance, fogState.environmentalStart(), fogState.environmentalEnd()),
+      linearFogValue(cylindricalFogDistance, fogState.renderDistanceStart(), fogState.renderDistanceEnd())
+    );
+    fogAmount = Math.clamp(fogAmount * ARGB.alphaFloat(fogState.color()), 0.0F, 1.0F);
+    if (fogAmount <= 0.0F) {
+      return color;
+    }
+
+    var r = colorChannel(Mth.lerp(fogAmount, (color >> 16) & 0xFF, (fogState.color() >> 16) & 0xFF));
+    var g = colorChannel(Mth.lerp(fogAmount, (color >> 8) & 0xFF, (fogState.color() >> 8) & 0xFF));
+    var b = colorChannel(Mth.lerp(fogAmount, color & 0xFF, fogState.color() & 0xFF));
+    return (color & 0xFF000000) | (r << 16) | (g << 8) | b;
+  }
+
+  private float linearFogValue(float distance, float start, float end) {
+    if (distance <= start) {
+      return 0.0F;
+    }
+    if (distance >= end) {
+      return 1.0F;
+    }
+    return (distance - start) / (end - start);
   }
 
   private boolean isInside(boolean positiveArea, float w0, float w1, float w2, boolean topLeft0, boolean topLeft1, boolean topLeft2) {
@@ -709,11 +790,54 @@ public final class RasterPipeline {
     UNTRACKED
   }
 
+  record FogState(
+    boolean enabled,
+    int color,
+    float environmentalStart,
+    float environmentalEnd,
+    float renderDistanceStart,
+    float renderDistanceEnd
+  ) {
+    static final FogState DISABLED = new FogState(false, 0, Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
+
+    static FogState from(RenderContext ctx) {
+      var probe = ctx.environmentProbe();
+      var environmentalStart = probe.getValue(EnvironmentAttributes.FOG_START_DISTANCE, 1.0F);
+      var environmentalEnd = probe.getValue(EnvironmentAttributes.FOG_END_DISTANCE, 1.0F);
+      var rainFogMultiplier = rainFogMultiplier(ctx);
+      environmentalStart -= 160.0F * rainFogMultiplier;
+      var minRainFogEnd = Math.min(96.0F, environmentalEnd);
+      environmentalEnd = Math.max(minRainFogEnd, environmentalEnd - 256.0F * rainFogMultiplier);
+
+      var renderDistanceEnd = (float) ctx.maxDistance();
+      var renderDistanceFogSpan = Mth.clamp(renderDistanceEnd / 10.0F, 4.0F, 64.0F);
+      return new FogState(
+        true,
+        SkyRenderer.atmosphericFogColor(ctx),
+        environmentalStart,
+        environmentalEnd,
+        renderDistanceEnd - renderDistanceFogSpan,
+        renderDistanceEnd
+      );
+    }
+
+    private static float rainFogMultiplier(RenderContext ctx) {
+      var camera = ctx.camera();
+      var cameraBlockPos = BlockPos.containing(camera.eyeX(), camera.eyeY(), camera.eyeZ());
+      var biome = ctx.level().getBiome(cameraBlockPos).value();
+      var skyLight = ctx.level().getLightEngine().getLayerListener(LightLayer.SKY).getLightValue(cameraBlockPos);
+      var skyLightMultiplier = Mth.clamp((skyLight - 8.0F) / 7.0F, 0.0F, 1.0F);
+      return ctx.level().getRainLevel(1.0F) * skyLightMultiplier * (biome.hasPrecipitation() ? 1.0F : 0.5F);
+    }
+  }
+
   private record ClipVertex(
     float x,
     float y,
     float z,
     float w,
+    float sphericalFogDistance,
+    float cylindricalFogDistance,
     float u,
     float v,
     float a,

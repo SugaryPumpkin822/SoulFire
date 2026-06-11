@@ -48,6 +48,7 @@ public record RenderMaterial(
   int colorWriteMask,
   UvTransform uvTransform,
   TextureSampleMode textureSampleMode,
+  boolean fog,
   boolean sortOnUpload,
   int sortGroup,
   float viewScale,
@@ -90,6 +91,7 @@ public record RenderMaterial(
       ColorTargetState.WRITE_ALL,
       UvTransform.IDENTITY,
       TextureSampleMode.COLOR,
+      true,
       defaultSortOnUpload(alphaMode),
       0,
       1.0F,
@@ -114,6 +116,7 @@ public record RenderMaterial(
       colorWriteMask,
       uvTransform,
       textureSampleMode,
+      fog,
       sortOnUpload,
       sortGroup,
       viewScale,
@@ -138,6 +141,7 @@ public record RenderMaterial(
       colorWriteMask,
       uvTransform,
       textureSampleMode,
+      fog,
       sortOnUpload,
       sortGroup,
       viewScale,
@@ -168,6 +172,7 @@ public record RenderMaterial(
       colorTargetState.writeMask(),
       UvTransform.fromMatrix(renderType.state.textureTransform.getMatrix()),
       textureSampleMode(renderType),
+      usesWorldFog(pipeline.getFragmentShader().getPath()),
       renderType.sortOnUpload() && renderType.mode() == VertexFormat.Mode.QUADS,
       sortGroup,
       viewScale(renderType),
@@ -193,6 +198,7 @@ public record RenderMaterial(
       colorTargetState.writeMask(),
       uvTransform,
       textureSampleMode,
+      usesWorldFog(pipeline.getFragmentShader().getPath()),
       sortOnUpload,
       sortGroup,
       viewScale,
@@ -217,6 +223,7 @@ public record RenderMaterial(
       colorWriteMask,
       uvTransform,
       textureSampleMode,
+      fog,
       sortOnUpload,
       sortGroup,
       viewScale,
@@ -270,6 +277,28 @@ public record RenderMaterial(
     return switch (fragmentShader) {
       case "core/rendertype_text_intensity", "core/rendertype_text_intensity_see_through" -> TextureSampleMode.INTENSITY;
       default -> TextureSampleMode.COLOR;
+    };
+  }
+
+  private static boolean usesWorldFog(String fragmentShader) {
+    return switch (fragmentShader) {
+      case "core/block",
+           "core/entity",
+           "core/item",
+           "core/particle",
+           "core/position",
+           "core/rendertype_beacon_beam",
+           "core/rendertype_crumbling",
+           "core/rendertype_end_portal",
+           "core/rendertype_entity_shadow",
+           "core/rendertype_leash",
+           "core/rendertype_lines",
+           "core/rendertype_text",
+           "core/rendertype_text_background",
+           "core/rendertype_text_intensity",
+           "core/sky",
+           "core/terrain" -> true;
+      default -> false;
     };
   }
 

@@ -230,6 +230,90 @@ class RasterPipelineTest {
   }
 
   @Test
+  void worldFogMixesRgbWithVanillaDistanceVaryings() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    scene.add(quad(-1.0F, -1.0F, 4.0F, 1.0F, 1.0F, solidTexture(0xFFFF0000), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF));
+
+    renderSynthetic(
+      pipeline,
+      camera,
+      scene.build(),
+      buffers,
+      0L,
+      0xFF000000,
+      new RasterPipeline.FogState(true, 0xFF204060, 0.0F, 4.0F, 64.0F, 64.0F)
+    );
+
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF204060, 3);
+  }
+
+  @Test
+  void worldFogPreservesFragmentAlphaBeforeColorWrite() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var scene = SceneData.builder();
+    scene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      materialWithBlendState(
+        RenderMaterial.create(solidTexture(0x80FF0000), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, false, 0.0F),
+        RenderMaterial.BlendState.REPLACE
+      )
+    ));
+
+    renderSynthetic(
+      pipeline,
+      camera,
+      scene.build(),
+      buffers,
+      0L,
+      0x00000000,
+      new RasterPipeline.FogState(true, 0xFF204060, 0.0F, 4.0F, 64.0F, 64.0F)
+    );
+
+    var color = buffers.image().getRGB(WIDTH / 2, HEIGHT / 2);
+    assertColorNear(color, 0x80204060, 3);
+    assertChannelNear((color >>> 24) & 0xFF, 128, 3);
+  }
+
+  @Test
+  void renderTypesWithoutFogShadersIgnoreWorldFog() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var material = RenderMaterial
+      .create(solidTexture(0xFFFF0000), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, false, 0.0F)
+      .withRenderType(RenderTypes.textSeeThrough(Identifier.withDefaultNamespace("font/test")));
+    var scene = SceneData.builder();
+    scene.add(customQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      material
+    ));
+
+    renderSynthetic(
+      pipeline,
+      camera,
+      scene.build(),
+      buffers,
+      0L,
+      0xFF000000,
+      new RasterPipeline.FogState(true, 0xFF204060, 0.0F, 4.0F, 64.0F, 64.0F)
+    );
+
+    assertFalse(material.fog());
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFFFF0000, 3);
+  }
+
+  @Test
   void depthTestCanBeDisabledForSeeThroughGeometry() {
     var pipeline = new RasterPipeline();
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
@@ -304,6 +388,7 @@ class RasterPipelineTest {
         ColorTargetState.WRITE_NONE,
         RenderMaterial.UvTransform.IDENTITY,
         RenderMaterial.TextureSampleMode.COLOR,
+        true,
         false,
         0,
         1.0F,
@@ -1031,9 +1116,21 @@ class RasterPipelineTest {
   }
 
   private static void renderSynthetic(RasterPipeline pipeline, Camera camera, SceneData sceneData, RasterBuffers buffers, long animationTick, int clearColor) {
+    renderSynthetic(pipeline, camera, sceneData, buffers, animationTick, clearColor, RasterPipeline.FogState.DISABLED);
+  }
+
+  private static void renderSynthetic(
+    RasterPipeline pipeline,
+    Camera camera,
+    SceneData sceneData,
+    RasterBuffers buffers,
+    long animationTick,
+    int clearColor,
+    RasterPipeline.FogState fogState
+  ) {
     buffers.clearColor(clearColor);
     buffers.clearDepth();
-    pipeline.renderScene(camera, sceneData, buffers, animationTick);
+    pipeline.renderScene(camera, sceneData, buffers, animationTick, fogState);
   }
 
   private static RenderMaterial translucentMaterial(RendererAssets.TextureImage texture, boolean depthWrite) {
@@ -1053,6 +1150,7 @@ class RasterPipelineTest {
       ColorTargetState.WRITE_ALL,
       RenderMaterial.UvTransform.IDENTITY,
       RenderMaterial.TextureSampleMode.COLOR,
+      true,
       true,
       0,
       1.0F,
@@ -1077,6 +1175,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       material.uvTransform(),
       material.textureSampleMode(),
+      material.fog(),
       material.sortOnUpload(),
       material.sortGroup(),
       material.viewScale(),
@@ -1106,6 +1205,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       material.uvTransform(),
       material.textureSampleMode(),
+      material.fog(),
       material.sortOnUpload(),
       material.sortGroup(),
       viewScale,
@@ -1136,6 +1236,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       material.uvTransform(),
       material.textureSampleMode(),
+      material.fog(),
       material.sortOnUpload(),
       material.sortGroup(),
       material.viewScale(),
@@ -1160,6 +1261,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       material.uvTransform(),
       material.textureSampleMode(),
+      material.fog(),
       sortOnUpload,
       material.sortGroup(),
       material.viewScale(),
@@ -1184,6 +1286,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       material.uvTransform(),
       material.textureSampleMode(),
+      material.fog(),
       material.sortOnUpload(),
       sortGroup,
       material.viewScale(),
@@ -1208,6 +1311,7 @@ class RasterPipelineTest {
       material.colorWriteMask(),
       uvTransform,
       material.textureSampleMode(),
+      material.fog(),
       material.sortOnUpload(),
       material.sortGroup(),
       material.viewScale(),

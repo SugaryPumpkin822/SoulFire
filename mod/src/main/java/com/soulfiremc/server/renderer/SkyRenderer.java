@@ -337,6 +337,7 @@ public final class SkyRenderer {
       RenderMaterial.UvTransform.IDENTITY,
       RenderMaterial.TextureSampleMode.COLOR,
       false,
+      false,
       0,
       1.0F,
       null
@@ -356,7 +357,7 @@ public final class SkyRenderer {
     return ARGB.srgbLerp(fogValue, color, ARGB.opaque(fogColor));
   }
 
-  private static int atmosphericFogColor(RenderContext ctx) {
+  static int atmosphericFogColor(RenderContext ctx) {
     var probe = ctx.environmentProbe();
     var fogColor = probe.getValue(EnvironmentAttributes.FOG_COLOR, 1.0F);
     var renderDistanceChunks = ctx.maxDistance() / 16.0F;

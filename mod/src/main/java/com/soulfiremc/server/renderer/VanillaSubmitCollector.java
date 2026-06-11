@@ -1284,6 +1284,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       material.colorWriteMask(),
       RenderMaterial.UvTransform.glint(glintScale(renderType)),
       material.textureSampleMode(),
+      material.fog(),
       false,
       sortGroups.group(renderType),
       material.viewScale(),
