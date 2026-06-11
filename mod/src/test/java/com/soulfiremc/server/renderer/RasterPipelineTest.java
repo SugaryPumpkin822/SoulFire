@@ -315,6 +315,43 @@ class RasterPipelineTest {
   }
 
   @Test
+  void beaconBeamFogUsesProjectedFragmentDepth() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    var material = RenderMaterial
+      .create(solidTexture(0xFFFF0000), RendererAssets.AlphaMode.TRANSLUCENT, 0xFFFFFFFF, true, 0.0F)
+      .withPipelineState(RenderPipelines.BEACON_BEAM_TRANSLUCENT);
+    var scene = SceneData.builder();
+    scene.add(new RenderQuad(
+      vertex(2.0F, -0.5F, 4.0F, 1.0F, 1.0F),
+      vertex(2.0F, 0.5F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, 0.5F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, -0.5F, 4.0F, 0.0F, 1.0F),
+      material
+    ));
+
+    renderSynthetic(
+      pipeline,
+      camera,
+      scene.build(),
+      buffers,
+      0L,
+      0xFF000000,
+      new RasterPipeline.FogState(true, 0xFF00FF00, 4.05F, 4.1F, 64.0F, 64.0F)
+    );
+
+    var sample = camera.viewProjectionMatrix().transformProject(new Vector3f(1.5F, 0.0F, 4.0F));
+    var sampleX = Math.clamp((int) ((sample.x() * 0.5F + 0.5F) * WIDTH), 0, WIDTH - 1);
+    var sampleY = Math.clamp((int) ((0.5F - sample.y() * 0.5F) * HEIGHT), 0, HEIGHT - 1);
+    var color = buffers.image().getRGB(sampleX, sampleY);
+
+    assertEquals(RenderMaterial.FogMode.DEPTH_COLOR_MIX, material.fogMode());
+    assertTrue(((color >> 16) & 0xFF) > 220, () -> "expected projected-depth beacon fog to preserve red but was 0x" + Integer.toHexString(color));
+    assertTrue(((color >> 8) & 0xFF) < 40, () -> "expected projected-depth beacon fog to avoid spherical green fog but was 0x" + Integer.toHexString(color));
+  }
+
+  @Test
   void lightningFogFadesSourceAlphaInsteadOfMixingFogColor() {
     var pipeline = new RasterPipeline();
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);

@@ -1669,12 +1669,26 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
 
     private void emitTriangle(CapturedVertex a, CapturedVertex b, CapturedVertex c) {
+      var colorA = a.color();
+      var colorB = b.color();
+      var colorC = c.color();
+      var lightA = a.light();
+      var lightB = b.light();
+      var lightC = c.light();
+      if (usesFlatVertexColor(renderType)) {
+        colorA = c.color();
+        colorB = c.color();
+        colorC = c.color();
+        lightA = c.light();
+        lightB = c.light();
+        lightC = c.light();
+      }
       addCapturedFace(
         new Vector3f[]{a.position(), b.position(), c.position(), c.position()},
         new Vector3f[]{a.normal(), b.normal(), c.normal(), c.normal()},
-        new int[]{a.color(), b.color(), c.color(), c.color()},
+        new int[]{colorA, colorB, colorC, colorC},
         new float[]{a.u(), a.v(), b.u(), b.v(), c.u(), c.v(), c.u(), c.v()},
-        new int[]{a.light(), b.light(), c.light(), c.light()},
+        new int[]{lightA, lightB, lightC, lightC},
         new int[]{a.overlayColor(), b.overlayColor(), c.overlayColor(), c.overlayColor()}
       );
     }
@@ -2174,6 +2188,10 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
 
     var path = renderType.pipeline().getLocation().getPath();
     return path.startsWith("pipeline/text") || path.startsWith("pipeline/gui_text");
+  }
+
+  private static boolean usesFlatVertexColor(@Nullable RenderType renderType) {
+    return renderType != null && renderType.pipeline().getFragmentShader().getPath().equals("core/rendertype_leash");
   }
 
   private final class OutlineVertexConsumer implements VertexConsumer {

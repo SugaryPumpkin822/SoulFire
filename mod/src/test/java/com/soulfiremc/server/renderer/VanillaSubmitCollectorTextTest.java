@@ -489,6 +489,31 @@ class VanillaSubmitCollectorTextTest {
     assertEquals(RenderMaterial.FogMode.RGB_FADE, itemGlint.fogMode());
     assertEquals(8.0F, uvScale(itemGlint.uvTransform()), 1.0E-5F);
     assertEquals(0.5F, uvScale(entityGlint.uvTransform()), 1.0E-5F);
+    assertEquals(0.0F, itemGlint.uvTransform().u(0.0F, 0.0F, 275L), 1.0E-5F);
+    assertEquals(0.0F, itemGlint.uvTransform().v(0.0F, 0.0F, 75L), 1.0E-5F);
+    assertEquals(-1.0F / 275.0F, itemGlint.uvTransform().u(0.0F, 0.0F, 1L), 1.0E-5F);
+    assertEquals(1.0F / 75.0F, itemGlint.uvTransform().v(0.0F, 0.0F, 1L), 1.0E-5F);
+  }
+
+  @Test
+  void leashTriangleStripsUseFlatProvokingVertexColor() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+    var consumer = newConsumer(collector, texture, RenderTypes.leash(), VertexFormat.Mode.TRIANGLE_STRIP);
+
+    addVertex(consumer, -0.5F, -0.5F, 4.0F, 0.0F, 0.0F, 0xFFFF0000, LightCoordsUtil.FULL_BRIGHT);
+    addVertex(consumer, 0.5F, -0.5F, 4.0F, 0.0F, 0.0F, 0xFF00FF00, LightCoordsUtil.FULL_BRIGHT);
+    addVertex(consumer, -0.5F, 0.5F, 4.0F, 0.0F, 0.0F, 0xFF0000FF, LightCoordsUtil.FULL_BRIGHT);
+    flush(consumer);
+
+    var scene = sceneData(collector);
+    assertEquals(1, scene.opaque().length);
+    var quad = scene.opaque()[0];
+    assertEquals(0xFF0000FF, quad.v0().color());
+    assertEquals(0xFF0000FF, quad.v1().color());
+    assertEquals(0xFF0000FF, quad.v2().color());
+    assertEquals(0xFF0000FF, quad.v3().color());
   }
 
   @Test

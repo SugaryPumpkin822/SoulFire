@@ -25,6 +25,7 @@ import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.LightLayer;
+import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
@@ -397,6 +398,7 @@ public final class RasterPipeline {
       return;
     }
     var fragmentDepthBias = fragmentDepthBias(triangle, material);
+    var depthFogProjection = depthFogProjection(camera, material);
     var positiveArea = area > 0.0F;
     var topLeft0 = positiveArea ? isTopLeft(v1.x(), v1.y(), v2.x(), v2.y()) : isTopLeft(v2.x(), v2.y(), v1.x(), v1.y());
     var topLeft1 = positiveArea ? isTopLeft(v2.x(), v2.y(), v0.x(), v0.y()) : isTopLeft(v0.x(), v0.y(), v2.x(), v2.y());
@@ -479,13 +481,18 @@ public final class RasterPipeline {
         }
 
         if (material.fogMode() != RenderMaterial.FogMode.NONE) {
-          color = applyFog(
-            color,
-            interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, true),
-            interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, false),
-            fogState,
-            material.fogMode()
-          );
+          if (material.fogMode() == RenderMaterial.FogMode.DEPTH_COLOR_MIX && depthFogProjection != null) {
+            var fogDistance = depthFogDistance(depth, depthFogProjection);
+            color = applyFog(color, fogDistance, fogDistance, fogState, material.fogMode());
+          } else {
+            color = applyFog(
+              color,
+              interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, true),
+              interpolatedFogDistance(normalizedW0, normalizedW1, normalizedW2, inverseW, v0, v1, v2, false),
+              fogState,
+              material.fogMode()
+            );
+          }
         }
 
         if (material.alphaMode() != RendererAssets.AlphaMode.TRANSLUCENT && !material.blendState().blends()) {
@@ -528,6 +535,26 @@ public final class RasterPipeline {
     var dzDx = (z1 * y2 - z2 * y1) / denominator;
     var dzDy = (x1 * z2 - x2 * z1) / denominator;
     return bias + Math.max(Math.abs(dzDx), Math.abs(dzDy)) * factor;
+  }
+
+  @Nullable
+  private DepthFogProjection depthFogProjection(Camera camera, RenderMaterial material) {
+    if (material.fogMode() != RenderMaterial.FogMode.DEPTH_COLOR_MIX) {
+      return null;
+    }
+
+    var projection = camera.projectionMatrix();
+    return new DepthFogProjection(projection.m22(), projection.m32());
+  }
+
+  private float depthFogDistance(float depth, DepthFogProjection projection) {
+    var denominator = depth * -2.0F + 1.0F - projection.m22();
+    if (!Float.isFinite(denominator) || Math.abs(denominator) <= 1.0E-8F) {
+      return Float.POSITIVE_INFINITY;
+    }
+
+    var distance = -projection.m32() / denominator;
+    return Float.isFinite(distance) ? distance : Float.POSITIVE_INFINITY;
   }
 
   private int interpolatedColor(
@@ -618,7 +645,7 @@ public final class RasterPipeline {
 
     return switch (fogMode) {
       case NONE -> color;
-      case COLOR_MIX -> applyColorMixFog(color, fogState, rawFogAmount);
+      case COLOR_MIX, DEPTH_COLOR_MIX -> applyColorMixFog(color, fogState, rawFogAmount);
       case ALPHA_FADE -> multiplyChannels(color, 1.0F - rawFogAmount, true);
       case RGB_FADE -> multiplyChannels(color, 1.0F - rawFogAmount, false);
     };
@@ -818,6 +845,8 @@ public final class RasterPipeline {
     TRANSLUCENT,
     UNTRACKED
   }
+
+  private record DepthFogProjection(float m22, float m32) {}
 
   record FogState(
     boolean enabled,

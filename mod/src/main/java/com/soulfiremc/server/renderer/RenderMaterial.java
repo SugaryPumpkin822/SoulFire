@@ -305,12 +305,12 @@ public record RenderMaterial(
     return switch (fragmentShader) {
       case "core/glint" -> FogMode.RGB_FADE;
       case "core/rendertype_lightning" -> FogMode.ALPHA_FADE;
+      case "core/rendertype_beacon_beam" -> FogMode.DEPTH_COLOR_MIX;
       case "core/block",
            "core/entity",
            "core/item",
            "core/particle",
            "core/position",
-           "core/rendertype_beacon_beam",
            "core/rendertype_crumbling",
            "core/rendertype_end_portal",
            "core/rendertype_entity_shadow",
@@ -455,6 +455,7 @@ public record RenderMaterial(
   public enum FogMode {
     NONE,
     COLOR_MIX,
+    DEPTH_COLOR_MIX,
     ALPHA_FADE,
     RGB_FADE
   }
@@ -487,8 +488,8 @@ public record RenderMaterial(
     long vPeriodTicks
   ) {
     public static final UvTransform IDENTITY = new UvTransform(1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0L, 0L);
-    private static final long GLINT_U_PERIOD_TICKS = 2_200L;
-    private static final long GLINT_V_PERIOD_TICKS = 600L;
+    private static final long GLINT_U_PERIOD_TICKS = 275L;
+    private static final long GLINT_V_PERIOD_TICKS = 75L;
 
     public static UvTransform glint(float scale) {
       var angle = (float) (Math.PI / 18.0);
