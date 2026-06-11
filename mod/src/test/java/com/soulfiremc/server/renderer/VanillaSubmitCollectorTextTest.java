@@ -192,11 +192,49 @@ class VanillaSubmitCollectorTextTest {
     assertEquals(0x80FF0000, scene.translucent()[1].v0().color());
   }
 
+  @Test
+  void capturedLinesUseScreenSpaceLineWidth() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+
+    var nearWidth = renderedLineWidth(camera, texture, 4.0F, 0.8F);
+    var farWidth = renderedLineWidth(camera, texture, 12.0F, 2.4F);
+    assertTrue(nearWidth >= 6, () -> "expected near line to be at least 6 px wide but was " + nearWidth);
+    assertTrue(farWidth >= 6, () -> "expected far line to be at least 6 px wide but was " + farWidth);
+    assertTrue(Math.abs(nearWidth - farWidth) <= 2, () -> "expected stable screen-space widths but got " + nearWidth + " and " + farWidth);
+  }
+
+  @Test
+  void capturedPointsUseSubmittedPointSize() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+    var consumer = newConsumer(collector, texture, RenderTypes.debugPoint(), VertexFormat.Mode.POINTS);
+
+    consumer.addVertex(0.0F, 0.0F, 6.0F).setColor(0xFFFFFFFF).setLineWidth(10.0F);
+    flush(consumer);
+
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    renderSynthetic(new RasterPipeline(), camera, sceneData(collector), buffers, 0L, 0xFF000000);
+
+    var width = changedRunWidth(buffers, WIDTH / 2, HEIGHT / 2, 0xFF000000);
+    assertTrue(width >= 8, () -> "expected point to use submitted size but was " + width + " px wide");
+  }
+
   private static VertexConsumer newTextConsumer(VanillaSubmitCollector collector, RendererAssets.TextureImage texture) throws Exception {
     return newTextConsumer(collector, texture, RenderTypes.textIntensity(Identifier.withDefaultNamespace("font/test")));
   }
 
   private static VertexConsumer newTextConsumer(VanillaSubmitCollector collector, RendererAssets.TextureImage texture, RenderType renderType) throws Exception {
+    return newConsumer(collector, texture, renderType, VertexFormat.Mode.QUADS);
+  }
+
+  private static VertexConsumer newConsumer(
+    VanillaSubmitCollector collector,
+    RendererAssets.TextureImage texture,
+    RenderType renderType,
+    VertexFormat.Mode mode
+  ) throws Exception {
     var consumerClass = Class.forName("com.soulfiremc.server.renderer.VanillaSubmitCollector$CapturingVertexConsumer");
     var constructor = consumerClass.getDeclaredConstructor(
       VanillaSubmitCollector.class,
@@ -212,7 +250,7 @@ class VanillaSubmitCollectorTextTest {
     return (VertexConsumer) constructor.newInstance(
       collector,
       new Matrix4f(),
-      VertexFormat.Mode.QUADS,
+      mode,
       texture,
       RendererAssets.AlphaMode.TRANSLUCENT,
       0,
@@ -260,6 +298,23 @@ class VanillaSubmitCollectorTextTest {
       .setOverlay(overlay);
   }
 
+  private static void addLineVertex(
+    VertexConsumer consumer,
+    float x,
+    float y,
+    float z,
+    float nx,
+    float ny,
+    float nz,
+    float lineWidth
+  ) {
+    consumer
+      .addVertex(x, y, z)
+      .setColor(0xFFFFFFFF)
+      .setNormal(nx, ny, nz)
+      .setLineWidth(lineWidth);
+  }
+
   private static void flush(VertexConsumer consumer) throws Exception {
     Method method = consumer.getClass().getDeclaredMethod("flush");
     method.setAccessible(true);
@@ -305,6 +360,46 @@ class VanillaSubmitCollectorTextTest {
       }
     }
     return count;
+  }
+
+  private static int changedRunWidth(RasterBuffers buffers, int centerX, int y, int backgroundColor) {
+    var minX = centerX;
+    var maxX = centerX;
+    var image = buffers.image();
+    while (minX > 0 && image.getRGB(minX - 1, y) != backgroundColor) {
+      minX--;
+    }
+    while (maxX + 1 < image.getWidth() && image.getRGB(maxX + 1, y) != backgroundColor) {
+      maxX++;
+    }
+    return maxX - minX + 1;
+  }
+
+  private static int renderedLineWidth(Camera camera, RendererAssets.TextureImage texture, float z, float halfHeight) throws Exception {
+    var collector = newCollector(camera);
+    var consumer = newConsumer(collector, texture, RenderTypes.lines(), VertexFormat.Mode.LINES);
+    addLineVertex(consumer, 0.0F, -halfHeight, z, 0.0F, 1.0F, 0.0F, 8.0F);
+    addLineVertex(consumer, 0.0F, halfHeight, z, 0.0F, 1.0F, 0.0F, 8.0F);
+    flush(consumer);
+
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    renderSynthetic(new RasterPipeline(), camera, sceneData(collector), buffers, 0L, 0xFF000000);
+    return maxChangedRunWidth(buffers, HEIGHT / 2, 0xFF000000);
+  }
+
+  private static int maxChangedRunWidth(RasterBuffers buffers, int y, int backgroundColor) {
+    var image = buffers.image();
+    var maxWidth = 0;
+    var currentWidth = 0;
+    for (var x = 0; x < image.getWidth(); x++) {
+      if (image.getRGB(x, y) == backgroundColor) {
+        maxWidth = Math.max(maxWidth, currentWidth);
+        currentWidth = 0;
+      } else {
+        currentWidth++;
+      }
+    }
+    return Math.max(maxWidth, currentWidth);
   }
 
   private static void assertColorNear(int actual, int expected, int tolerance) {

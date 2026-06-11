@@ -83,6 +83,7 @@ import org.joml.Matrix4fc;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Vector3fc;
+import org.joml.Vector4f;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -100,6 +101,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   private static final int GLINT_TINT = 0x99A070FF;
   private static final int LEASH_RENDER_STEPS = 24;
   private static final float LEASH_WIDTH = 0.05F;
+  private static final float LINE_SHADER_VIEW_SCALE = 1.0F - 1.0F / 256.0F;
   private static final Direction[] DIRECTIONS = Direction.values();
   private static final RendererAssets.TextureImage WHITE_TEXTURE = createSolidTexture(0xFFFFFFFF);
   private final RenderContext ctx;
@@ -1351,61 +1353,90 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
 
     private void emitLine(CapturedVertex a, CapturedVertex b) {
-      var direction = new Vector3f(b.position()).sub(a.position());
-      if (direction.lengthSquared() < 1.0E-6F) {
+      var material = materialForFace(
+        new int[]{a.color(), a.color(), b.color(), b.color()},
+        new float[]{a.u(), a.v(), a.u(), a.v(), b.u(), b.v(), b.u(), b.v()}
+      );
+      var clipToWorld = clipToWorld(material.viewScale());
+      var shaderScale = material.viewScale() * LINE_SHADER_VIEW_SCALE;
+      var aClip = clipPosition(a.position(), shaderScale);
+      var bClip = clipPosition(b.position(), shaderScale);
+      if (!isUsableClip(aClip) || !isUsableClip(bClip)) {
         return;
       }
-      direction.normalize();
-      var cameraForward = new Vector3f((float) ctx.camera().forwardX(), (float) ctx.camera().forwardY(), (float) ctx.camera().forwardZ());
-      var side = new Vector3f(direction).cross(cameraForward);
-      if (side.lengthSquared() < 1.0E-6F) {
-        side = new Vector3f(direction).cross((float) ctx.camera().upX(), (float) ctx.camera().upY(), (float) ctx.camera().upZ());
+
+      var segmentOffset = lineOffset(aClip, bClip, Math.max(a.lineWidth(), b.lineWidth()));
+      var aOffset = lineOffset(a, aClip, shaderScale, segmentOffset);
+      var bOffset = lineOffset(b, bClip, shaderScale, segmentOffset);
+      var positions = new Vector3f[]{
+        unprojectClipOffset(aClip, -aOffset.x(), -aOffset.y(), clipToWorld),
+        unprojectClipOffset(aClip, aOffset.x(), aOffset.y(), clipToWorld),
+        unprojectClipOffset(bClip, bOffset.x(), bOffset.y(), clipToWorld),
+        unprojectClipOffset(bClip, -bOffset.x(), -bOffset.y(), clipToWorld)
+      };
+      for (var position : positions) {
+        if (position == null) {
+          return;
+        }
       }
-      if (side.lengthSquared() < 1.0E-6F) {
-        side.set((float) ctx.camera().screenLeftX(), (float) ctx.camera().screenLeftY(), (float) ctx.camera().screenLeftZ());
-      }
-      side.normalize(Math.max(0.005F, lineWidth * 0.005F));
+
       addCapturedFace(
-        new Vector3f[]{
-          new Vector3f(a.position()).sub(side),
-          new Vector3f(a.position()).add(side),
-          new Vector3f(b.position()).add(side),
-          new Vector3f(b.position()).sub(side)
-        },
+        positions,
         new int[]{a.color(), a.color(), b.color(), b.color()},
-        new float[]{0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 1.0F, 0.0F},
+        new float[]{a.u(), a.v(), a.u(), a.v(), b.u(), b.v(), b.u(), b.v()},
         new int[]{a.light(), a.light(), b.light(), b.light()},
-        new int[]{a.overlayColor(), a.overlayColor(), b.overlayColor(), b.overlayColor()}
+        new int[]{a.overlayColor(), a.overlayColor(), b.overlayColor(), b.overlayColor()},
+        material
       );
     }
 
     private void emitPoint(CapturedVertex vertex) {
-      var size = 0.03F;
-      var right = new Vector3f((float) ctx.camera().screenLeftX(), (float) ctx.camera().screenLeftY(), (float) ctx.camera().screenLeftZ()).normalize(size);
-      var up = new Vector3f((float) ctx.camera().upX(), (float) ctx.camera().upY(), (float) ctx.camera().upZ()).normalize(size);
-      addCapturedFace(
-        new Vector3f[]{
-          new Vector3f(vertex.position()).sub(right).sub(up),
-          new Vector3f(vertex.position()).sub(right).add(up),
-          new Vector3f(vertex.position()).add(right).add(up),
-          new Vector3f(vertex.position()).add(right).sub(up)
-        },
+      var material = materialForFace(
         new int[]{vertex.color(), vertex.color(), vertex.color(), vertex.color()},
-        new float[]{0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F},
+        new float[]{vertex.u(), vertex.v(), vertex.u(), vertex.v(), vertex.u(), vertex.v(), vertex.u(), vertex.v()}
+      );
+      var clip = clipPosition(vertex.position(), material.viewScale());
+      if (!isUsableClip(clip)) {
+        return;
+      }
+
+      var clipToWorld = clipToWorld(material.viewScale());
+      var halfWidth = Math.max(0.0F, vertex.lineWidth()) / ctx.camera().width();
+      var halfHeight = Math.max(0.0F, vertex.lineWidth()) / ctx.camera().height();
+      var positions = new Vector3f[]{
+        unprojectClipOffset(clip, -halfWidth, -halfHeight, clipToWorld),
+        unprojectClipOffset(clip, -halfWidth, halfHeight, clipToWorld),
+        unprojectClipOffset(clip, halfWidth, halfHeight, clipToWorld),
+        unprojectClipOffset(clip, halfWidth, -halfHeight, clipToWorld)
+      };
+      for (var position : positions) {
+        if (position == null) {
+          return;
+        }
+      }
+
+      addCapturedFace(
+        positions,
+        new int[]{vertex.color(), vertex.color(), vertex.color(), vertex.color()},
+        new float[]{vertex.u(), vertex.v(), vertex.u(), vertex.v(), vertex.u(), vertex.v(), vertex.u(), vertex.v()},
         new int[]{vertex.light(), vertex.light(), vertex.light(), vertex.light()},
-        new int[]{vertex.overlayColor(), vertex.overlayColor(), vertex.overlayColor(), vertex.overlayColor()}
+        new int[]{vertex.overlayColor(), vertex.overlayColor(), vertex.overlayColor(), vertex.overlayColor()},
+        material
       );
     }
 
     private void addCapturedFace(Vector3f[] positions, int[] colors, float[] uv, int[] lights, int[] overlayColors) {
-      var faceAlphaMode = renderType != null ? alphaMode(renderType, texture, colors, uv) : alphaMode;
-      var faceAlphaCutoutThreshold = renderType != null ? alphaCutoutThreshold(renderType, faceAlphaMode) : alphaCutoutThreshold;
-      var material = materialOverride != null
-        ? materialOverride
-        : RenderMaterial.create(texture, faceAlphaMode, 0xFFFFFFFF, isTextRenderType(renderType), 0.0F, faceAlphaCutoutThreshold).withDepthState(depthStencilState);
-      if (materialOverride == null && renderType != null) {
-        material = material.withRenderType(renderType, sortGroups.group(renderType));
-      }
+      addCapturedFace(positions, colors, uv, lights, overlayColors, materialForFace(colors, uv));
+    }
+
+    private void addCapturedFace(
+      Vector3f[] positions,
+      int[] colors,
+      float[] uv,
+      int[] lights,
+      int[] overlayColors,
+      RenderMaterial material
+    ) {
       var applyOverlay = materialOverride == null && usesOverlay(renderType);
       builder.add(new RenderQuad(
         renderVertex(positions[0], uv[0], uv[1], colors[0], lights[0], overlayColors[0], applyOverlay),
@@ -1414,6 +1445,98 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         renderVertex(positions[3], uv[6], uv[7], colors[3], lights[3], overlayColors[3], applyOverlay),
         material
       ));
+    }
+
+    private RenderMaterial materialForFace(int[] colors, float[] uv) {
+      var faceAlphaMode = renderType != null ? alphaMode(renderType, texture, colors, uv) : alphaMode;
+      var faceAlphaCutoutThreshold = renderType != null ? alphaCutoutThreshold(renderType, faceAlphaMode) : alphaCutoutThreshold;
+      var material = materialOverride != null
+        ? materialOverride
+        : RenderMaterial.create(texture, faceAlphaMode, 0xFFFFFFFF, isTextRenderType(renderType), 0.0F, faceAlphaCutoutThreshold).withDepthState(depthStencilState);
+      if (materialOverride == null && renderType != null) {
+        material = material.withRenderType(renderType, sortGroups.group(renderType));
+      }
+      return material;
+    }
+
+    private Vector4f clipPosition(Vector3f position, float viewScale) {
+      var view = ctx.camera().viewRotationMatrix().transform(new Vector4f(
+        (float) (position.x() - ctx.camera().eyeX()),
+        (float) (position.y() - ctx.camera().eyeY()),
+        (float) (position.z() - ctx.camera().eyeZ()),
+        1.0F
+      ));
+      if (viewScale != 1.0F) {
+        view.mul(viewScale, viewScale, viewScale, 1.0F);
+      }
+      return ctx.camera().projectionMatrix().transform(view);
+    }
+
+    private Matrix4f clipToWorld(float viewScale) {
+      var view = ctx.camera().viewRotationMatrix();
+      view.translate((float) -ctx.camera().eyeX(), (float) -ctx.camera().eyeY(), (float) -ctx.camera().eyeZ());
+      return new Matrix4f(ctx.camera().projectionMatrix())
+        .scale(viewScale, viewScale, viewScale)
+        .mul(view)
+        .invert();
+    }
+
+    private boolean isUsableClip(Vector4f clip) {
+      return Float.isFinite(clip.x)
+        && Float.isFinite(clip.y)
+        && Float.isFinite(clip.z)
+        && Float.isFinite(clip.w)
+        && Math.abs(clip.w) > 1.0E-6F;
+    }
+
+    private ScreenOffset lineOffset(CapturedVertex vertex, Vector4f clip, float shaderScale, ScreenOffset fallback) {
+      var normal = vertex.normal();
+      if (normal.lengthSquared() <= 1.0E-8F) {
+        return fallback;
+      }
+
+      var normalEnd = clipPosition(new Vector3f(vertex.position()).add(normal), shaderScale);
+      if (!isUsableClip(normalEnd)) {
+        return fallback;
+      }
+
+      var offset = lineOffset(clip, normalEnd, vertex.lineWidth());
+      return offset.usable() ? offset : fallback;
+    }
+
+    private ScreenOffset lineOffset(Vector4f startClip, Vector4f endClip, float lineWidth) {
+      var startInverseW = 1.0F / startClip.w;
+      var endInverseW = 1.0F / endClip.w;
+      var dx = (endClip.x * endInverseW - startClip.x * startInverseW) * ctx.camera().width();
+      var dy = (endClip.y * endInverseW - startClip.y * startInverseW) * ctx.camera().height();
+      var length = (float) Math.sqrt(dx * dx + dy * dy);
+      if (!Float.isFinite(length) || length <= 1.0E-6F) {
+        return ScreenOffset.UNUSABLE;
+      }
+
+      var offsetX = -dy / length * lineWidth / ctx.camera().width();
+      var offsetY = dx / length * lineWidth / ctx.camera().height();
+      if (offsetX < 0.0F) {
+        offsetX = -offsetX;
+        offsetY = -offsetY;
+      }
+      return new ScreenOffset(offsetX, offsetY, true);
+    }
+
+    @Nullable
+    private Vector3f unprojectClipOffset(Vector4f clip, float offsetX, float offsetY, Matrix4f clipToWorld) {
+      var inverseW = 1.0F / clip.w;
+      var x = (clip.x * inverseW + offsetX) * clip.w;
+      var y = (clip.y * inverseW + offsetY) * clip.w;
+      var world = clipToWorld.transform(new Vector4f(x, y, clip.z, clip.w));
+      if (!Float.isFinite(world.x)
+        || !Float.isFinite(world.y)
+        || !Float.isFinite(world.z)
+        || !Float.isFinite(world.w)
+        || Math.abs(world.w) <= 1.0E-6F) {
+        return null;
+      }
+      return new Vector3f(world.x / world.w, world.y / world.w, world.z / world.w);
     }
 
     private RenderVertex renderVertex(Vector3f position, float u, float v, int color, int light, int overlayColor, boolean applyOverlay) {
@@ -1443,7 +1566,9 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         0.0F,
         0.0F,
         LightCoordsUtil.FULL_BRIGHT,
-        RenderVertex.NO_OVERLAY_COLOR
+        RenderVertex.NO_OVERLAY_COLOR,
+        new Vector3f(),
+        lineWidth
       );
       vertices.add(current);
       return this;
@@ -1486,9 +1611,23 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       }
       return this;
     }
-    @Override public VertexConsumer setNormal(float x, float y, float z) { return this; }
+    @Override public VertexConsumer setNormal(float x, float y, float z) {
+      if (current != null) {
+        current = current.withNormal(new Vector3f(
+          Math.clamp(x, -1.0F, 1.0F),
+          Math.clamp(y, -1.0F, 1.0F),
+          Math.clamp(z, -1.0F, 1.0F)
+        ));
+        vertices.set(vertices.size() - 1, current);
+      }
+      return this;
+    }
     @Override public VertexConsumer setLineWidth(float width) {
-      this.lineWidth = Math.max(1.0F, width);
+      this.lineWidth = Float.isFinite(width) ? width : 1.0F;
+      if (current != null) {
+        current = current.withLineWidth(this.lineWidth);
+        vertices.set(vertices.size() - 1, current);
+      }
       return this;
     }
   }
@@ -1634,26 +1773,47 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     }
   }
 
-  private record CapturedVertex(Vector3f position, int color, float u, float v, int light, int overlayColor) {
+  private record CapturedVertex(
+    Vector3f position,
+    int color,
+    float u,
+    float v,
+    int light,
+    int overlayColor,
+    Vector3f normal,
+    float lineWidth
+  ) {
     private CapturedVertex withPosition(Vector3f position) {
-      return new CapturedVertex(position, color, u, v, light, overlayColor);
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
 
     private CapturedVertex withColor(int color) {
-      return new CapturedVertex(position, color, u, v, light, overlayColor);
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
 
     private CapturedVertex withUv(float u, float v) {
-      return new CapturedVertex(position, color, u, v, light, overlayColor);
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
 
     private CapturedVertex withLight(int light) {
-      return new CapturedVertex(position, color, u, v, light, overlayColor);
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
 
     private CapturedVertex withOverlayColor(int overlayColor) {
-      return new CapturedVertex(position, color, u, v, light, overlayColor);
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
+
+    private CapturedVertex withNormal(Vector3f normal) {
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
+    }
+
+    private CapturedVertex withLineWidth(float lineWidth) {
+      return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
+    }
+  }
+
+  private record ScreenOffset(float x, float y, boolean usable) {
+    private static final ScreenOffset UNUSABLE = new ScreenOffset(0.0F, 0.0F, false);
   }
 
   private static final class SortGroupRegistry {
