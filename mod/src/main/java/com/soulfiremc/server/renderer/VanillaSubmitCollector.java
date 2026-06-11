@@ -1566,13 +1566,17 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         new int[]{a.color(), a.color(), b.color(), b.color()},
         new float[]{a.u(), a.v(), a.u(), a.v(), b.u(), b.v(), b.u(), b.v()}
       );
-      var clipToWorld = clipToWorld(material.viewScale());
       var shaderScale = material.viewScale() * LINE_SHADER_VIEW_SCALE;
       var aClip = clipPosition(a.position(), shaderScale);
       var bClip = clipPosition(b.position(), shaderScale);
-      if (!isUsableClip(aClip) || !isUsableClip(bClip)) {
+      var line = clipLine(a, b, aClip, bClip);
+      if (line == null) {
         return;
       }
+      a = line.a();
+      b = line.b();
+      aClip = line.aClip();
+      bClip = line.bClip();
 
       var aSegmentOffset = lineOffset(aClip, bClip, a.lineWidth());
       var bSegmentOffset = lineOffset(aClip, bClip, b.lineWidth());
@@ -1580,6 +1584,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         return;
       }
 
+      var clipToWorld = clipToWorld(shaderScale);
       var aOffset = lineOffset(a, aClip, shaderScale, aSegmentOffset);
       var bOffset = lineOffset(b, bClip, shaderScale, bSegmentOffset);
       var positions = new Vector3f[]{
@@ -1761,6 +1766,70 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         && clip.z <= clip.w + epsilon;
     }
 
+    @Nullable
+    private ClippedLine clipLine(CapturedVertex a, CapturedVertex b, Vector4f aClip, Vector4f bClip) {
+      if (!isUsableClip(aClip) || !isUsableClip(bClip)) {
+        return null;
+      }
+
+      var line = new ClippedLine(a, b, aClip, bClip);
+      for (var plane : ClipPlane.values()) {
+        line = clipLine(line, plane);
+        if (line == null) {
+          return null;
+        }
+      }
+
+      return isUsableClip(line.aClip()) && isUsableClip(line.bClip()) ? line : null;
+    }
+
+    @Nullable
+    private ClippedLine clipLine(ClippedLine line, ClipPlane plane) {
+      var aDistance = clipDistance(line.aClip(), plane);
+      var bDistance = clipDistance(line.bClip(), plane);
+      var aInside = aDistance >= 0.0F;
+      var bInside = bDistance >= 0.0F;
+      if (aInside && bInside) {
+        return line;
+      }
+      if (!aInside && !bInside) {
+        return null;
+      }
+
+      var delta = aDistance - bDistance;
+      if (Math.abs(delta) <= 1.0E-8F) {
+        return null;
+      }
+
+      var t = Math.clamp(aDistance / delta, 0.0F, 1.0F);
+      var vertex = line.a().interpolate(line.b(), t);
+      var clip = interpolateClip(line.aClip(), line.bClip(), t);
+      if (aInside) {
+        return new ClippedLine(line.a(), vertex, line.aClip(), clip);
+      }
+      return new ClippedLine(vertex, line.b(), clip, line.bClip());
+    }
+
+    private float clipDistance(Vector4f clip, ClipPlane plane) {
+      return switch (plane) {
+        case LEFT -> clip.x + clip.w;
+        case RIGHT -> clip.w - clip.x;
+        case BOTTOM -> clip.y + clip.w;
+        case TOP -> clip.w - clip.y;
+        case NEAR -> clip.z + clip.w;
+        case FAR -> clip.w - clip.z;
+      };
+    }
+
+    private Vector4f interpolateClip(Vector4f a, Vector4f b, float t) {
+      return new Vector4f(
+        Mth.lerp(t, a.x, b.x),
+        Mth.lerp(t, a.y, b.y),
+        Mth.lerp(t, a.z, b.z),
+        Mth.lerp(t, a.w, b.w)
+      );
+    }
+
     private ScreenOffset lineOffset(CapturedVertex vertex, Vector4f clip, float shaderScale, ScreenOffset fallback) {
       var normal = vertex.normal();
       if (normal.lengthSquared() <= 1.0E-8F) {
@@ -1824,8 +1893,13 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     ) {
       var shadingRenderType = shadingRenderType();
       var shadedColor = directionalLightColor(color, normal, shadingRenderType, faceLighting);
+      var shadedOverlayColor = applyOverlay ? overlayColor : RenderVertex.NO_OVERLAY_COLOR;
       if (materialOverride == null) {
-        shadedColor = modulateColor(shadedColor, lightColor(light, 0, shadingRenderType));
+        var lightColor = lightColor(light, 0, shadingRenderType);
+        shadedColor = modulateColor(shadedColor, lightColor);
+        if (applyOverlay) {
+          shadedOverlayColor = modulateColor(shadedOverlayColor, lightColor);
+        }
       }
       return new RenderVertex(
         position.x(),
@@ -1834,7 +1908,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         u,
         v,
         shadedColor,
-        applyOverlay ? overlayColor : RenderVertex.NO_OVERLAY_COLOR
+        shadedOverlayColor
       );
     }
 
@@ -1932,6 +2006,18 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
 
     var alpha = Math.clamp((int) ((1.0F - x / 15.0F * 0.75F) * 255.0F), 0, 255);
     return (alpha << 24) | 0x00FFFFFF;
+  }
+
+  private static int interpolateArgb(int left, int right, float t) {
+    var a = interpolateChannel(left >>> 24, right >>> 24, t);
+    var r = interpolateChannel(left >>> 16, right >>> 16, t);
+    var g = interpolateChannel(left >>> 8, right >>> 8, t);
+    var b = interpolateChannel(left, right, t);
+    return (a << 24) | (r << 16) | (g << 8) | b;
+  }
+
+  private static int interpolateChannel(int left, int right, float t) {
+    return Math.clamp(Math.round(Mth.lerp(t, left & 0xFF, right & 0xFF)), 0, 255);
   }
 
   private static boolean isTextRenderType(@Nullable RenderType renderType) {
@@ -2097,7 +2183,24 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     private CapturedVertex withLineWidth(float lineWidth) {
       return new CapturedVertex(position, color, u, v, light, overlayColor, normal, lineWidth);
     }
+
+    private CapturedVertex interpolate(CapturedVertex next, float t) {
+      var blockLight = Math.clamp(Math.round(Mth.lerp(t, LightCoordsUtil.block(light), LightCoordsUtil.block(next.light()))), 0, 15);
+      var skyLight = Math.clamp(Math.round(Mth.lerp(t, LightCoordsUtil.sky(light), LightCoordsUtil.sky(next.light()))), 0, 15);
+      return new CapturedVertex(
+        new Vector3f(position).lerp(next.position(), t),
+        interpolateArgb(color, next.color(), t),
+        Mth.lerp(t, u, next.u()),
+        Mth.lerp(t, v, next.v()),
+        LightCoordsUtil.pack(blockLight, skyLight),
+        interpolateArgb(overlayColor, next.overlayColor(), t),
+        new Vector3f(normal).lerp(next.normal(), t),
+        Mth.lerp(t, lineWidth, next.lineWidth())
+      );
+    }
   }
+
+  private record ClippedLine(CapturedVertex a, CapturedVertex b, Vector4f aClip, Vector4f bClip) {}
 
   private record ScreenOffset(float x, float y, boolean usable) {
     private static final ScreenOffset UNUSABLE = new ScreenOffset(0.0F, 0.0F, false);
@@ -2106,6 +2209,15 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
   private enum FaceLighting {
     FRONT,
     BACK
+  }
+
+  private enum ClipPlane {
+    LEFT,
+    RIGHT,
+    BOTTOM,
+    TOP,
+    NEAR,
+    FAR
   }
 
   private enum FeatureStage {

@@ -196,6 +196,28 @@ class VanillaSubmitCollectorTextTest {
   }
 
   @Test
+  void entityOverlayIsLightmappedAfterBlendLikeVanillaShader() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFF0000FF}, null);
+    var renderType = RenderTypes.entityCutout(Identifier.withDefaultNamespace("textures/entity/test"));
+    var consumer = newTextConsumer(collector, texture, renderType);
+    var overlay = OverlayTexture.pack(0.0F, true);
+    var light = LightCoordsUtil.pack(0, 0);
+
+    addVertex(consumer, -0.75F, 0.4F, 4.0F, 0.0F, 0.0F, 0xFFFFFFFF, light, overlay);
+    addVertex(consumer, -0.75F, -0.4F, 4.0F, 0.0F, 1.0F, 0xFFFFFFFF, light, overlay);
+    addVertex(consumer, 0.75F, -0.4F, 4.0F, 1.0F, 1.0F, 0xFFFFFFFF, light, overlay);
+    addVertex(consumer, 0.75F, 0.4F, 4.0F, 1.0F, 0.0F, 0xFFFFFFFF, light, overlay);
+    flush(consumer);
+
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    renderSynthetic(new RasterPipeline(), camera, sceneData(collector), buffers, 0L, 0xFF000000);
+
+    assertColorNear(buffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF0E0020, 3);
+  }
+
+  @Test
   void entityVerticesApplyVanillaDirectionalLightingFromNormals() throws Exception {
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
     var collector = newCollector(camera);
@@ -398,6 +420,28 @@ class VanillaSubmitCollectorTextTest {
     var wideWidth = Math.max(firstWidth, lastWidth);
     assertTrue(narrowWidth <= 5, () -> "expected one line end to stay narrow but widths were " + firstWidth + " and " + lastWidth);
     assertTrue(wideWidth >= 10, () -> "expected one line end to stay wide but widths were " + firstWidth + " and " + lastWidth);
+  }
+
+  @Test
+  void linesCrossingNearPlaneAreClippedBeforeScreenExpansion() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+    var consumer = newConsumer(collector, texture, RenderTypes.lines(), VertexFormat.Mode.LINES);
+
+    addLineVertex(consumer, 0.0F, -0.5F, -1.0F, 0.0F, 1.0F, 0.0F, 10.0F);
+    addLineVertex(consumer, 0.0F, 0.5F, 6.0F, 0.0F, 1.0F, 0.0F, 10.0F);
+    flush(consumer);
+
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    renderSynthetic(new RasterPipeline(), camera, sceneData(collector), buffers, 0L, 0xFF000000);
+
+    var changedPixels = countChangedPixels(buffers, 0xFF000000);
+    assertTrue(changedPixels > 0, "expected visible clipped line segment");
+    assertTrue(
+      changedPixels < WIDTH * HEIGHT / 3,
+      () -> "expected clipped line to stay bounded but changed " + changedPixels + " pixels"
+    );
   }
 
   @Test
