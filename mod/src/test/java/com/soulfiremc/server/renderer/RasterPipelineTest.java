@@ -80,6 +80,38 @@ class RasterPipelineTest {
   }
 
   @Test
+  void singleSidedRasterizationKeepsFrontFaceWinding() {
+    var pipeline = new RasterPipeline();
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var material = RenderMaterial.create(solidTexture(0xFFFF0000), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F);
+
+    var frontBuffers = new RasterBuffers(WIDTH, HEIGHT);
+    var frontScene = SceneData.builder();
+    frontScene.add(new RenderQuad(
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      material
+    ));
+    renderSynthetic(pipeline, camera, frontScene.build(), frontBuffers, 0L, 0xFF000000);
+
+    var backBuffers = new RasterBuffers(WIDTH, HEIGHT);
+    var backScene = SceneData.builder();
+    backScene.add(new RenderQuad(
+      vertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F),
+      vertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F),
+      vertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F),
+      vertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F),
+      material
+    ));
+    renderSynthetic(pipeline, camera, backScene.build(), backBuffers, 0L, 0xFF000000);
+
+    assertColorNear(frontBuffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFFFF0000, 3);
+    assertColorNear(backBuffers.image().getRGB(WIDTH / 2, HEIGHT / 2), 0xFF000000, 3);
+  }
+
+  @Test
   void nearerOpaqueQuadWinsDepthTest() {
     var pipeline = new RasterPipeline();
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
@@ -190,10 +222,10 @@ class RasterPipelineTest {
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
     var scene = SceneData.builder();
     scene.add(new RenderQuad(
-      new RenderVertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F, 0xFF00FF00),
-      new RenderVertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F, 0xFF00FF00),
-      new RenderVertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F, 0xFFFF0000),
       new RenderVertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F, 0xFFFF0000),
+      new RenderVertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F, 0xFFFF0000),
+      new RenderVertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F, 0xFF00FF00),
+      new RenderVertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F, 0xFF00FF00),
       RenderMaterial.create(solidTexture(0xFFFFFFFF), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F)
     ));
 
@@ -218,10 +250,10 @@ class RasterPipelineTest {
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
     var scene = SceneData.builder();
     scene.add(new RenderQuad(
-      new RenderVertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F, 0xFFFFFFFF, 0xB2FF0000),
-      new RenderVertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F, 0xFFFFFFFF, 0xB2FF0000),
-      new RenderVertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F, 0xFFFFFFFF, 0xB2FF0000),
       new RenderVertex(-1.0F, -1.0F, 4.0F, 0.0F, 1.0F, 0xFFFFFFFF, 0xB2FF0000),
+      new RenderVertex(-1.0F, 1.0F, 4.0F, 0.0F, 0.0F, 0xFFFFFFFF, 0xB2FF0000),
+      new RenderVertex(1.0F, 1.0F, 4.0F, 1.0F, 0.0F, 0xFFFFFFFF, 0xB2FF0000),
+      new RenderVertex(1.0F, -1.0F, 4.0F, 1.0F, 1.0F, 0xFFFFFFFF, 0xB2FF0000),
       RenderMaterial.create(solidTexture(0xFF0000FF), RendererAssets.AlphaMode.OPAQUE, 0xFFFFFFFF, false, 0.0F)
     ));
 
@@ -1277,10 +1309,10 @@ class RasterPipelineTest {
     int color
   ) {
     return new RenderQuad(
-      vertex(maxX, minY, z, 1.0F, 1.0F),
-      vertex(maxX, maxY, z, 1.0F, 0.0F),
-      vertex(minX, maxY, z, 0.0F, 0.0F),
       vertex(minX, minY, z, 0.0F, 1.0F),
+      vertex(minX, maxY, z, 0.0F, 0.0F),
+      vertex(maxX, maxY, z, 1.0F, 0.0F),
+      vertex(maxX, minY, z, 1.0F, 1.0F),
       RenderMaterial.create(texture, alphaMode, color, false, 0.0F)
     );
   }
@@ -1295,10 +1327,10 @@ class RasterPipelineTest {
     int color
   ) {
     return new RenderQuad(
-      v3,
-      v2,
-      v1,
       v0,
+      v1,
+      v2,
+      v3,
       RenderMaterial.create(texture, alphaMode, color, false, 0.0F)
     );
   }
@@ -1310,7 +1342,7 @@ class RasterPipelineTest {
     RenderVertex v3,
     RenderMaterial material
   ) {
-    return new RenderQuad(v3, v2, v1, v0, material);
+    return new RenderQuad(v0, v1, v2, v3, material);
   }
 
   private static RenderVertex vertex(float x, float y, float z, float u, float v) {

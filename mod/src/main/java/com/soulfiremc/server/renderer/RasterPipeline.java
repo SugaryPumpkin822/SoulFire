@@ -412,7 +412,7 @@ public final class RasterPipeline {
       return;
     }
     var material = triangle.material();
-    if (!material.doubleSided() && area >= 0.0F) {
+    if (!material.doubleSided() && area <= 0.0F) {
       return;
     }
     var fragmentDepthBias = fragmentDepthBias(triangle, material);

@@ -231,10 +231,10 @@ class VanillaSubmitCollectorTextTest {
     var renderType = RenderTypes.entityCutout(Identifier.withDefaultNamespace("textures/entity/test"));
     var consumer = newTextConsumer(collector, texture, renderType);
 
-    addEntityVertex(consumer, -0.75F, 0.4F, 4.0F, 0.0F, 0.0F, 0.0F, -1.0F, 0.0F);
     addEntityVertex(consumer, -0.75F, -0.4F, 4.0F, 0.0F, 1.0F, 0.0F, -1.0F, 0.0F);
-    addEntityVertex(consumer, 0.75F, -0.4F, 4.0F, 1.0F, 1.0F, 0.0F, -1.0F, 0.0F);
+    addEntityVertex(consumer, -0.75F, 0.4F, 4.0F, 0.0F, 0.0F, 0.0F, -1.0F, 0.0F);
     addEntityVertex(consumer, 0.75F, 0.4F, 4.0F, 1.0F, 0.0F, 0.0F, -1.0F, 0.0F);
+    addEntityVertex(consumer, 0.75F, -0.4F, 4.0F, 1.0F, 1.0F, 0.0F, -1.0F, 0.0F);
     flush(consumer);
 
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
@@ -315,10 +315,10 @@ class VanillaSubmitCollectorTextTest {
     var renderType = RenderTypes.entityCutout(Identifier.withDefaultNamespace("textures/entity/test"));
     var consumer = newTextConsumer(collector, texture, renderType);
 
-    addEntityVertex(consumer, 0.75F, 0.4F, 4.0F, 1.0F, 0.0F, 0.0F, -1.0F, 0.0F);
-    addEntityVertex(consumer, 0.75F, -0.4F, 4.0F, 1.0F, 1.0F, 0.0F, -1.0F, 0.0F);
-    addEntityVertex(consumer, -0.75F, -0.4F, 4.0F, 0.0F, 1.0F, 0.0F, -1.0F, 0.0F);
     addEntityVertex(consumer, -0.75F, 0.4F, 4.0F, 0.0F, 0.0F, 0.0F, -1.0F, 0.0F);
+    addEntityVertex(consumer, -0.75F, -0.4F, 4.0F, 0.0F, 1.0F, 0.0F, -1.0F, 0.0F);
+    addEntityVertex(consumer, 0.75F, -0.4F, 4.0F, 1.0F, 1.0F, 0.0F, -1.0F, 0.0F);
+    addEntityVertex(consumer, 0.75F, 0.4F, 4.0F, 1.0F, 0.0F, 0.0F, -1.0F, 0.0F);
     flush(consumer);
 
     var buffers = new RasterBuffers(WIDTH, HEIGHT);
