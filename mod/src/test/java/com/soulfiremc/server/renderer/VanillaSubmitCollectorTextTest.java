@@ -18,6 +18,7 @@
 package com.soulfiremc.server.renderer;
 
 import com.mojang.blaze3d.pipeline.DepthStencilState;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.particle.SingleQuadParticle;
@@ -27,15 +28,18 @@ import net.minecraft.client.renderer.state.level.QuadParticleRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
+import org.joml.Vector3f;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VanillaSubmitCollectorTextTest {
@@ -348,6 +352,65 @@ class VanillaSubmitCollectorTextTest {
   }
 
   @Test
+  void lineFallbackUsesEachEndpointLineWidth() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+    var consumer = newConsumer(collector, texture, RenderTypes.lines(), VertexFormat.Mode.LINES);
+
+    addLineVertex(consumer, 0.0F, -1.0F, 6.0F, 0.0F, 0.0F, 0.0F, 2.0F);
+    addLineVertex(consumer, 0.0F, 1.0F, 6.0F, 0.0F, 0.0F, 0.0F, 14.0F);
+    flush(consumer);
+
+    var buffers = new RasterBuffers(WIDTH, HEIGHT);
+    renderSynthetic(new RasterPipeline(), camera, sceneData(collector), buffers, 0L, 0xFF000000);
+
+    var firstRow = firstChangedRow(buffers, 0xFF000000);
+    var lastRow = lastChangedRow(buffers, 0xFF000000);
+    assertTrue(firstRow >= 0 && lastRow >= firstRow);
+
+    var firstWidth = changedRunWidth(buffers, WIDTH / 2, Math.min(firstRow + 2, lastRow), 0xFF000000);
+    var lastWidth = changedRunWidth(buffers, WIDTH / 2, Math.max(lastRow - 2, firstRow), 0xFF000000);
+    var narrowWidth = Math.min(firstWidth, lastWidth);
+    var wideWidth = Math.max(firstWidth, lastWidth);
+    assertTrue(narrowWidth <= 5, () -> "expected one line end to stay narrow but widths were " + firstWidth + " and " + lastWidth);
+    assertTrue(wideWidth >= 10, () -> "expected one line end to stay wide but widths were " + firstWidth + " and " + lastWidth);
+  }
+
+  @Test
+  void glintMaterialsUseVanillaFoilRenderState() throws Exception {
+    var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
+    var collector = newCollector(camera);
+    var texture = RendererAssets.TextureImage.fromArgb(1, 1, new int[]{0xFFFFFFFF}, null);
+    var method = VanillaSubmitCollector.class.getDeclaredMethod("glintMaterial", RendererAssets.TextureImage.class, RenderType.class);
+    method.setAccessible(true);
+
+    var itemGlint = (RenderMaterial) method.invoke(collector, texture, RenderTypes.glint());
+    var entityGlint = (RenderMaterial) method.invoke(collector, texture, RenderTypes.entityGlint());
+
+    assertEquals(RenderMaterial.DepthTest.EQUAL, itemGlint.depthTest());
+    assertFalse(itemGlint.depthWrite());
+    assertTrue(itemGlint.blendState().blends());
+    assertEquals(8.0F, uvScale(itemGlint.uvTransform()), 1.0E-5F);
+    assertEquals(0.5F, uvScale(entityGlint.uvTransform()), 1.0E-5F);
+  }
+
+  @Test
+  void specialFoilDecalPoseUsesVanillaDisplayScale() throws Exception {
+    var method = VanillaSubmitCollector.class.getDeclaredMethod("specialFoilDecalPose", ItemDisplayContext.class, PoseStack.Pose.class);
+    method.setAccessible(true);
+    var poseStack = new PoseStack();
+
+    var guiPose = (PoseStack.Pose) method.invoke(null, ItemDisplayContext.GUI, poseStack.last());
+    var firstPersonPose = (PoseStack.Pose) method.invoke(null, ItemDisplayContext.FIRST_PERSON_RIGHT_HAND, poseStack.last());
+    var thirdPersonPose = (PoseStack.Pose) method.invoke(null, ItemDisplayContext.THIRD_PERSON_RIGHT_HAND, poseStack.last());
+
+    assertEquals(0.5F, transformedX(guiPose, 1.0F), 1.0E-6F);
+    assertEquals(0.75F, transformedX(firstPersonPose, 1.0F), 1.0E-6F);
+    assertEquals(1.0F, transformedX(thirdPersonPose, 1.0F), 1.0E-6F);
+  }
+
+  @Test
   void capturedPointsUseSubmittedPointSize() throws Exception {
     var camera = new Camera(new Vec3(0.0, 0.0, 0.0), 0.0F, 0.0F, WIDTH, HEIGHT, 70.0, 64.0F);
     var collector = newCollector(camera);
@@ -599,6 +662,30 @@ class VanillaSubmitCollectorTextTest {
     return maxX - minX + 1;
   }
 
+  private static int firstChangedRow(RasterBuffers buffers, int backgroundColor) {
+    var image = buffers.image();
+    for (var y = 0; y < image.getHeight(); y++) {
+      for (var x = 0; x < image.getWidth(); x++) {
+        if (image.getRGB(x, y) != backgroundColor) {
+          return y;
+        }
+      }
+    }
+    return -1;
+  }
+
+  private static int lastChangedRow(RasterBuffers buffers, int backgroundColor) {
+    var image = buffers.image();
+    for (var y = image.getHeight() - 1; y >= 0; y--) {
+      for (var x = 0; x < image.getWidth(); x++) {
+        if (image.getRGB(x, y) != backgroundColor) {
+          return y;
+        }
+      }
+    }
+    return -1;
+  }
+
   private static int renderedLineWidth(Camera camera, RendererAssets.TextureImage texture, float z, float halfHeight) throws Exception {
     var collector = newCollector(camera);
     var consumer = newConsumer(collector, texture, RenderTypes.lines(), VertexFormat.Mode.LINES);
@@ -624,6 +711,14 @@ class VanillaSubmitCollectorTextTest {
       }
     }
     return Math.max(maxWidth, currentWidth);
+  }
+
+  private static float uvScale(RenderMaterial.UvTransform transform) {
+    return (float) Math.hypot(transform.uFromU(), transform.vFromU());
+  }
+
+  private static float transformedX(PoseStack.Pose pose, float x) {
+    return pose.pose().transformPosition(new Vector3f(x, 0.0F, 0.0F)).x();
   }
 
   private static void assertColorNear(int actual, int expected, int tolerance) {

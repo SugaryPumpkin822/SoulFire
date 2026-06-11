@@ -17,8 +17,6 @@
  */
 package com.soulfiremc.server.renderer;
 
-import com.mojang.blaze3d.pipeline.BlendFunction;
-import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -26,6 +24,7 @@ import com.mojang.blaze3d.vertex.QuadInstance;
 import com.mojang.blaze3d.vertex.SheetedDecalTextureGenerator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.math.MatrixUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.model.Model;
@@ -47,6 +46,7 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.feature.ItemFeatureRenderer;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
@@ -574,12 +574,13 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
       captureCrumblingGeometry(true, crumblingOverlay, renderer);
       if (hasFoil) {
         var glintTexture = glintTexture();
+        var glintRenderType = foilRenderType(renderType, sheeted);
         captureRenderedGeometry(
-          renderType,
+          glintRenderType,
           glintTexture,
           RendererAssets.AlphaMode.TRANSLUCENT,
-          0,
-          glintMaterial(glintTexture, sheeted),
+          alphaCutoutThreshold(glintRenderType, RendererAssets.AlphaMode.TRANSLUCENT),
+          glintMaterial(glintTexture, glintRenderType),
           consumer -> modelPart.render(poseStack, consumer, LightCoordsUtil.FULL_BRIGHT, overlay, 0xFFFFFFFF)
         );
       }
@@ -676,7 +677,7 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         appendBakedQuad(quad, poseStack.last().pose(), itemRenderType, 0xFFFFFFFF, tints, light, overlay);
         appendBakedQuadOutline(quad, poseStack.last().pose(), itemRenderType, outlineColor, overlay);
         if (foilType != ItemStackRenderState.FoilType.NONE) {
-          appendBakedQuadGlint(quad, poseStack.last().pose());
+          appendBakedQuadGlint(quad, poseStack.last(), itemRenderType, displayContext, foilType);
         }
       }
     });
@@ -974,19 +975,35 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     builder().add(withRenderState(withOverlay(renderQuad, outlineRenderType, overlay), outlineRenderType));
   }
 
-  private void appendBakedQuadGlint(BakedQuad quad, Matrix4fc poseMatrix) {
-    var captured = captureBakedQuad(quad, poseMatrix);
-    if (captured == null) {
+  private void appendBakedQuadGlint(
+    BakedQuad quad,
+    PoseStack.Pose pose,
+    @Nullable RenderType renderType,
+    ItemDisplayContext displayContext,
+    ItemStackRenderState.FoilType foilType
+  ) {
+    if (quad == null || quad.materialInfo() == null) {
       return;
     }
 
-    builder().add(new RenderQuad(
-      new RenderVertex(captured.vertices()[0].x(), captured.vertices()[0].y(), captured.vertices()[0].z(), captured.uv()[0], captured.uv()[1], 0xFFFFFFFF),
-      new RenderVertex(captured.vertices()[1].x(), captured.vertices()[1].y(), captured.vertices()[1].z(), captured.uv()[2], captured.uv()[3], 0xFFFFFFFF),
-      new RenderVertex(captured.vertices()[2].x(), captured.vertices()[2].y(), captured.vertices()[2].z(), captured.uv()[4], captured.uv()[5], 0xFFFFFFFF),
-      new RenderVertex(captured.vertices()[3].x(), captured.vertices()[3].y(), captured.vertices()[3].z(), captured.uv()[6], captured.uv()[7], 0xFFFFFFFF),
-      glintMaterial(glintTexture(), true)
-    ));
+    var glintTexture = glintTexture();
+    var glintRenderType = foilRenderType(renderType, true);
+    var consumer = new CapturingVertexConsumer(
+      new Matrix4f(),
+      glintRenderType.mode(),
+      glintTexture,
+      RendererAssets.AlphaMode.TRANSLUCENT,
+      alphaCutoutThreshold(glintRenderType, RendererAssets.AlphaMode.TRANSLUCENT),
+      glintRenderType,
+      null,
+      glintMaterial(glintTexture, glintRenderType)
+    );
+    var output = foilType == ItemStackRenderState.FoilType.SPECIAL
+      ? new SheetedDecalTextureGenerator(consumer, specialFoilDecalPose(displayContext, pose), 0.0078125F)
+      : consumer;
+    var instance = new QuadInstance();
+    putQuad(pose, quad, instance, output);
+    consumer.flush();
   }
 
   @Nullable
@@ -1208,28 +1225,69 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
     return renderType != null && !renderType.pipeline().isCull();
   }
 
-  private RenderMaterial glintMaterial(RendererAssets.TextureImage texture, boolean sheeted) {
+  private RenderType foilRenderType(@Nullable RenderType renderType, boolean sheeted) {
+    if (renderType == null) {
+      return sheeted ? RenderTypes.glint() : RenderTypes.entityGlint();
+    }
+    if (Minecraft.getInstance() == null) {
+      return sheeted ? RenderTypes.glint() : RenderTypes.entityGlint();
+    }
+
+    return ItemFeatureRenderer.getFoilRenderType(renderType, sheeted);
+  }
+
+  private static PoseStack.Pose specialFoilDecalPose(ItemDisplayContext displayContext, PoseStack.Pose pose) {
+    var foilDecalPose = pose.copy();
+    if (displayContext == ItemDisplayContext.GUI) {
+      MatrixUtil.mulComponentWise(foilDecalPose.pose(), 0.5F);
+    } else if (displayContext.firstPerson()) {
+      MatrixUtil.mulComponentWise(foilDecalPose.pose(), 0.75F);
+    }
+    return foilDecalPose;
+  }
+
+  private RenderMaterial glintMaterial(RendererAssets.TextureImage texture, RenderType renderType) {
+    var material = RenderMaterial
+      .create(
+        texture,
+        RendererAssets.AlphaMode.TRANSLUCENT,
+        GLINT_TINT,
+        true,
+        0.0F,
+        alphaCutoutThreshold(renderType, RendererAssets.AlphaMode.TRANSLUCENT)
+      )
+      .withPipelineState(renderType.pipeline());
     return new RenderMaterial(
-      texture,
-      RendererAssets.AlphaMode.TRANSLUCENT,
-      GLINT_TINT,
-      true,
-      0.0F,
-      0.0F,
-      0.0F,
-      RenderMaterial.shaderAlphaCutoutThreshold(RenderTypes.entityGlint(), RendererAssets.AlphaMode.TRANSLUCENT),
-      RenderMaterial.AlphaCutoutSource.FINAL_COLOR,
-      RenderMaterial.DepthTest.EQUAL,
+      material.texture(),
+      material.alphaMode(),
+      material.color(),
+      material.doubleSided(),
+      material.depthBias(),
+      material.polygonOffsetFactor(),
+      material.polygonOffsetUnits(),
+      material.alphaCutoutThreshold(),
+      material.alphaCutoutSource(),
+      material.depthTest(),
+      material.depthWrite(),
+      material.blendState(),
+      material.colorWriteMask(),
+      RenderMaterial.UvTransform.glint(glintScale(renderType)),
+      material.textureSampleMode(),
       false,
-      RenderMaterial.BlendState.from(BlendFunction.GLINT),
-      ColorTargetState.WRITE_ALL,
-      RenderMaterial.UvTransform.glint(sheeted ? 8.0F : 0.5F),
-      RenderMaterial.TextureSampleMode.COLOR,
-      false,
-      0,
-      1.0F,
-      null
+      sortGroups.group(renderType),
+      material.viewScale(),
+      material.dissolveMaskTexture()
     );
+  }
+
+  private static float glintScale(RenderType renderType) {
+    if (renderType == RenderTypes.entityGlint()) {
+      return 0.5F;
+    }
+    if (renderType == RenderTypes.armorEntityGlint()) {
+      return 0.16F;
+    }
+    return 8.0F;
   }
 
   private RendererAssets.TextureImage glintTexture() {
@@ -1505,9 +1563,14 @@ final class VanillaSubmitCollector implements SubmitNodeCollector, OrderedSubmit
         return;
       }
 
-      var segmentOffset = lineOffset(aClip, bClip, Math.max(a.lineWidth(), b.lineWidth()));
-      var aOffset = lineOffset(a, aClip, shaderScale, segmentOffset);
-      var bOffset = lineOffset(b, bClip, shaderScale, segmentOffset);
+      var aSegmentOffset = lineOffset(aClip, bClip, a.lineWidth());
+      var bSegmentOffset = lineOffset(aClip, bClip, b.lineWidth());
+      if (!aSegmentOffset.usable() || !bSegmentOffset.usable()) {
+        return;
+      }
+
+      var aOffset = lineOffset(a, aClip, shaderScale, aSegmentOffset);
+      var bOffset = lineOffset(b, bClip, shaderScale, bSegmentOffset);
       var positions = new Vector3f[]{
         unprojectClipOffset(aClip, -aOffset.x(), -aOffset.y(), clipToWorld),
         unprojectClipOffset(aClip, aOffset.x(), aOffset.y(), clipToWorld),
